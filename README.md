@@ -164,6 +164,7 @@ un fallo.
 ## Más
 
 - [Diseño](docs/diseno.md): cómo clasifica, cómo borra y el formato de los presets.
+- [Hoja de ruta hacia la 1.0](ROADMAP.md) y [registro de cambios](CHANGELOG.md)
 - [Contribuir](CONTRIBUTING.md)
 - [Aviso legal](AVISO-LEGAL.md): marcas, riesgo de borrado y tus normas.
 

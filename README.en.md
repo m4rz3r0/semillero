@@ -170,6 +170,7 @@ including how to report a vulnerability privately.
 ## More
 
 - [Design](docs/diseno.md) (Spanish): how it sorts, how it deletes, the preset file format.
+- [Roadmap to 1.0](ROADMAP.md) and [changelog](CHANGELOG.md) (Spanish)
 - [Contributing](CONTRIBUTING.md) (Spanish)
 - [Legal notice](AVISO-LEGAL.md) (Spanish): trademarks, deletion risk, your tracker's rules.
 

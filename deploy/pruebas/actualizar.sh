@@ -60,6 +60,16 @@ done
 	echo "FALLO: falta deploy/freebsd/actualizar.sh" >&2
 	exit 1
 }
+# El actualizador usa «set -o pipefail», que tiene el sh de FreeBSD pero no
+# el dash de Debian y Ubuntu: ahí se prueba con bash en modo POSIX.
+SH_ACT=sh
+if ! sh -c 'set -o pipefail' 2>/dev/null; then
+	command -v bash >/dev/null 2>&1 || {
+		echo "FALLO: este sh no tiene pipefail y falta bash" >&2
+		exit 1
+	}
+	SH_ACT="bash --posix"
+fi
 
 T=$(mktemp -d)
 limpiar()
@@ -286,6 +296,12 @@ if [ "\$#" -eq 1 ]; then
 	exit 0
 fi
 shift
+# El actualizador se relanza con /bin/sh bajo el cerrojo: aquí, con el sh
+# que tiene pipefail.
+if [ "\$1" = /bin/sh ]; then
+	shift
+	exec $SH_ACT "\$@"
+fi
 exec "\$@"
 EOF
 
@@ -454,7 +470,7 @@ actualizar()
 		SEMILLERO_ACT_PATH=$F:/usr/local/bin:/usr/bin:/bin \
 		SEMILLERO_ACT_ESPERA=3 \
 		TMPDIR=$T/tmpdir \
-		sh "$ACT" "$@" >"$T/salida" 2>&1 || _rc=$?
+		$SH_ACT "$ACT" "$@" >"$T/salida" 2>&1 || _rc=$?
 	cat "$T/salida" >>"$T/salidas"
 	_restos=$(find "$T/tmpdir" -mindepth 1 -maxdepth 1 -exec basename {} \; | tr '\n' ' ')
 	if [ -n "$_restos" ]; then
