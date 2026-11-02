@@ -1,0 +1,10 @@
+/target
+*.db
+*.db-*
+.superpowers/
+# Configuración local de deploy/ (direcciones y usuarios de cada instalación)
+/deploy/config.local
+# Lo que escribe «semillero configurar» si se lanza en el repositorio: la
+# configuración y las claves no se suben nunca.
+semillero.env
+*.clave

@@ -1,0 +1,13 @@
+[package]
+name = "reglas"
+version = "0.1.0"
+description = "Clasificación de torrents según las normas del tracker, reglas de borrado y presets"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+serde.workspace = true
+# Archivos de preset.
+toml.workspace = true

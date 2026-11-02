@@ -1,0 +1,97 @@
+#!/bin/sh
+#
+# PROVIDE: semillero
+# REQUIRE: NETWORKING
+# KEYWORD: shutdown
+#
+# semillero como servicio de FreeBSD (en una jail o en el propio host), con
+# daemon(8) y un usuario sin privilegios. Va en
+# /usr/local/etc/rc.d/semillero con permisos 555.
+#
+# En /etc/rc.conf (sysrc):
+#   semillero_enable="YES"
+#   semillero_env_file="/usr/local/etc/semillero/semillero.env"
+#       fichero VARIABLE=valor (el que escribe «semillero configurar
+#       --env /usr/local/etc/semillero/semillero.env --secretos
+#       /var/db/semillero»); si
+#       no existe, valen los valores por defecto. Tiene que ser de root y
+#       que nadie más pueda escribirlo. Solo cuentan las variables
+#       SEMILLERO_*.
+#   semillero_env="SEMILLERO_...=... ..."
+#       variables sueltas; mandan sobre las del fichero.
+#   semillero_runas="semillero"      usuario sin privilegios
+#   semillero_dir="/usr/local/semillero/current"
+#   semillero_db_dir="/var/db/semillero"
+#       base de datos (si SEMILLERO_DB no dice otra cosa).
+
+# Las variables de abajo las lee rc.subr.
+# shellcheck disable=SC2034
+
+. /etc/rc.subr
+
+name=semillero
+rcvar=semillero_enable
+
+load_rc_config $name
+
+: ${semillero_enable:="NO"}
+: ${semillero_runas:="semillero"}
+: ${semillero_dir:="/usr/local/semillero/current"}
+: ${semillero_db_dir:="/var/db/semillero"}
+: ${semillero_env_file:="/usr/local/etc/semillero/semillero.env"}
+: ${semillero_env:=""}
+
+pidfile="/var/run/${name}/${name}.pid"
+logfile="/var/log/${name}-daemon.log"
+command="/usr/sbin/daemon"
+start_precmd="${name}_prestart"
+
+# Exporta las variables SEMILLERO_* del fichero $1 (VARIABLE=valor, sin
+# comillas; # empieza un comentario). Se lee línea a línea, sin pasar por
+# el shell, así que un valor no puede ejecutar nada.
+semillero_leer_env()
+{
+	if [ "$(stat -f %u "$1")" != 0 ] || [ -n "$(find "$1" \( -perm -0020 -o -perm -0002 \))" ]; then
+		err 1 "$1 tiene que ser de root y que nadie más pueda escribirlo"
+	fi
+	while IFS= read -r _l || [ -n "${_l}" ]; do
+		_l=${_l%"$(printf '\r')"}
+		case ${_l} in
+		'' | '#'*) continue ;;
+		SEMILLERO_*=*) ;;
+		*)
+			warn "${1}: se ignora una línea que no es SEMILLERO_...=valor"
+			continue
+			;;
+		esac
+		_k=${_l%%=*}
+		case ${_k} in
+		*[!A-Z0-9_]*)
+			warn "${1}: se ignora la variable no válida ${_k}"
+			continue
+			;;
+		esac
+		export "${_k}=${_l#*=}"
+	done <"$1"
+}
+
+# El enlace se resuelve al arrancar: programa y web, de la misma versión.
+semillero_prestart()
+{
+	_dir=$(realpath "${semillero_dir}" 2>/dev/null)
+	if [ -z "${_dir}" ] || [ ! -x "${_dir}/semillero" ]; then
+		err 1 "no hay ninguna versión instalada en ${semillero_dir}"
+	fi
+	if [ -e "${semillero_env_file}" ]; then
+		semillero_leer_env "${semillero_env_file}"
+	fi
+	export SEMILLERO_DB="${SEMILLERO_DB:-${semillero_db_dir}/semillero.db}"
+	command_args="-f -r -R 5 -P ${pidfile} -u ${semillero_runas} -o ${logfile} \
+		/usr/bin/env NO_COLOR=1 LEPTOS_SITE_ROOT=${_dir}/site ${semillero_env} \
+		${_dir}/semillero"
+	install -d -o "${semillero_runas}" -m 755 "/var/run/${name}"
+	install -d -o "${semillero_runas}" -m 700 "${semillero_db_dir}"
+	[ -e "${logfile}" ] || install -o "${semillero_runas}" -m 640 /dev/null "${logfile}"
+}
+
+run_rc_command "$1"

@@ -1,0 +1,16 @@
+[package]
+name = "jellyfin"
+version = "0.1.0"
+description = "Aviso mínimo a Jellyfin: reescanear la biblioteca tras borrar"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+reqwest.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+axum = { workspace = true, features = ["tokio", "http1"] }
+tokio.workspace = true

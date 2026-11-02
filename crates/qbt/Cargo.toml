@@ -1,0 +1,20 @@
+[package]
+name = "qbt"
+version = "0.1.0"
+description = "Cliente mínimo de la API web v2 de qBittorrent 5.x"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+form_urlencoded.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+qbt-sim = { path = "../qbt-sim" }
+# `io-util`: un qBittorrent falso que contesta a mano en las pruebas.
+tokio = { workspace = true, features = ["io-util"] }

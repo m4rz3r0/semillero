@@ -1,0 +1,2391 @@
+/*
+ * «Vivero»: la identidad de semillero, ahora como un huerto. Suelo verde
+ * salvia, tinta de tierra, acento verde musgo; trigo para lo que crece y
+ * remolacha para lo que borra. Alegreya en los títulos y Alegreya Sans en
+ * el texto y las cifras (números de ancho fijo y altura de mayúscula).
+ *
+ * Todas las páginas son la misma escena, sobre la misma rejilla: el cielo
+ * con la cabecera (de día claro, de noche oscuro; en el jardín, con el
+ * tiempo que hace: sol, luna, nubes), el seto y el suelo del jardín
+ * hasta abajo. En el jardín, un bancal de madera con sus macetas en filas
+ * y una etiqueta de papel en su estaca delante de cada una;
+ * cuatro pestañas grandes (letrero, hoja, piedra y sobre de semillas)
+ * cambian de bancal. Las reglas, en letreros y sobres de semillas; el
+ * historial, en el cuaderno del jardinero. Sin tarjetas, sin bordes de
+ * color a la izquierda, sin etiquetas en mayúsculas. Un solo movimiento
+ * sin pedirlo: las plantas crecen al cargar; al cambiar de bancal, entra
+ * deslizándose; recoger una maceta la hace irse (nada de esto con
+ * `prefers-reduced-motion`).
+ *
+ * Sin estilos en línea (CSP `style-src 'self'`): todo color y medida sale
+ * de aquí. Tema claro y oscuro con los mismos nombres de variables; el
+ * sistema decide salvo que `<html data-tema>` diga «claro» u «oscuro».
+ * Cada texto cumple 4,5:1 sobre --cielo, --tierra-escena, --hoja,
+ * --papel, --madera, --sobre, --papel-etiqueta y el relleno de cada
+ * pestaña.
+ *
+ * Fuentes (SIL OFL 1.1, subconjunto latino; licencias en /fuentes).
+ */
+
+/* ---------------------------------------------------------------- Fuentes */
+
+@font-face {
+  font-family: "Alegreya";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fuentes/alegreya-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Alegreya";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fuentes/alegreya-latin-400-italic.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Alegreya";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fuentes/alegreya-latin-700-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Alegreya Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fuentes/alegreya-sans-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Alegreya Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fuentes/alegreya-sans-latin-500-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Alegreya Sans";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fuentes/alegreya-sans-latin-700-normal.woff2") format("woff2");
+}
+
+/* ---------------------------------------------------------------- Tokens */
+
+:root {
+  --esp-1: 0.25rem;
+  --esp-2: 0.5rem;
+  --esp-3: 0.75rem;
+  --esp-4: 1rem;
+  --esp-5: 1.5rem;
+  --esp-6: 2.5rem;
+  --esp-7: 3.5rem;
+  /* Una sola rejilla para todo: el mismo ancho y los mismos márgenes en
+   * la cabecera, las pestañas, el bancal y las demás páginas. */
+  --ancho-escena: 72rem;
+  --canal: 1rem;
+  /* Canto rodado: esquinas que no son iguales entre sí. */
+  --canto: 1.1rem 0.8rem 1rem 0.7rem / 0.8rem 1rem 0.7rem 1.1rem;
+
+  --fuente-texto: "Alegreya Sans", "Gill Sans", "Trebuchet MS", system-ui, sans-serif;
+  --fuente-titulos: "Alegreya", "Iowan Old Style", Georgia, serif;
+
+  /* Claro: suelo salvia. */
+  color-scheme: light;
+  --suelo: #eef2ea;
+  --hoja: #f7f9f4;
+  --velo-recoger: #dce7d2;
+  --tinta: #2a2b22;
+  --tinta-suave: #535a4b;
+  --linea: #7d8873;
+  --surco: #b3bda7;
+  --musgo: #4f9d69;
+  --musgo-hondo: #2f6b43;
+  --brote: #8db83a;
+  --brote-trazo: #5b7f1e;
+  --trigo: #c99a2e;
+  --trigo-trazo: #8a6516;
+  --trigo-texto: #8a6516;
+  --remolacha: #9b2d4a;
+  --semilla: #7a5a3a;
+  --sobre-acento: #ffffff;
+  --foco: #2f6b43;
+  --velo-dialogo: rgb(42 43 34 / 0.45);
+  --papel: #fcfaf3;
+  --tierra-maceta: #5a4330;
+  --barro: #b5653f;
+  --barro-borde: #94502f;
+  --vidriado: #4c7a80;
+  --vidriado-borde: #3a6166;
+  --piedra: #8c8a80;
+  --piedra-borde: #6f6d64;
+  --brillo: rgb(255 255 255 / 0.45);
+  --flor-clara: #ecd28a;
+  --margen: #d9a9b6;
+  --tierra-escena: #e6dcc6;
+  --monticulo: #d2c3a3;
+  --seto: #6f9a5d;
+  --seto-claro: #86ad6f;
+  --luna: transparent;
+  --madera: #dcb98f;
+  --madera-borde: #6e4a2b;
+  --madera-veta: #b28a5c;
+  --hoja-viva: #c3dca6;
+  --hoja-viva-borde: #3f6b2c;
+  --hoja-viva-nervio: #86ad66;
+  --canto-rodado: #d3d0c5;
+  --canto-rodado-borde: #66645b;
+  --canto-rodado-mota: #a19e92;
+  --sobre: #f3e6c2;
+  --sobre-borde: #86621a;
+  --sobre-doblez: #c9a85a;
+  --cielo: #dbe8e5;
+  --tierra-cama: #6e5139;
+  --tierra-cama-surco: #573f2b;
+  --sombra-maceta: rgb(40 24 12 / 0.4);
+  --estaca: #b58f5f;
+  --estaca-borde: #6e4a2b;
+  --raya-cuaderno: #c6d4dc;
+  --anilla: #8c8a80;
+  /* Las etiquetas de papel: claras también de noche (como iluminadas). */
+  --papel-etiqueta: #fbf6e7;
+  --borde-etiqueta: #8f8466;
+  --brillo-etiqueta: rgb(0 0 0 / 0.18);
+  /* El tiempo del jardín (cabecera). */
+  --sol: #e0a526;
+  --sol-rayo: #c58a14;
+  --nube: #ffffff;
+  --nube-borde: #93a3a8;
+  --nube-tormenta: #7d878c;
+  --nube-tormenta-borde: #5a6367;
+  --lluvia: #4f7896;
+  --rayo: #f2c53d;
+  --rayo-borde: #a8780f;
+  --cielo-nublado: #d6e0df;
+  --cielo-tormenta: #d2dcdc;
+  --falla-madera: #7d2039;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-tema="claro"]) {
+    color-scheme: dark;
+    --suelo: #18211c;
+    --hoja: #1f2a23;
+    --velo-recoger: #22332a;
+    --tinta: #e6ebe1;
+    --tinta-suave: #a9b3a4;
+    --linea: #6f7b6c;
+    --surco: #3d4c41;
+    --musgo: #6fb585;
+    --musgo-hondo: #7cc796;
+    --brote: #a6cf5a;
+    --brote-trazo: #c3e38a;
+    --trigo: #e0b54e;
+    --trigo-trazo: #f0d08a;
+    --trigo-texto: #e0b54e;
+    --remolacha: #e68aa3;
+    --semilla: #b79572;
+    --sobre-acento: #10261a;
+    --foco: #7cc796;
+    --velo-dialogo: rgb(0 0 0 / 0.6);
+    --papel: #222b25;
+    --tierra-maceta: #3b2c20;
+    --barro: #b5653f;
+    --barro-borde: #94502f;
+    --vidriado: #4c7a80;
+    --vidriado-borde: #3a6166;
+    --piedra: #8c8a80;
+    --piedra-borde: #6f6d64;
+    --brillo: rgb(255 255 255 / 0.35);
+    --flor-clara: #f0dc9e;
+    --margen: #6b3f4b;
+    --tierra-escena: #2a2920;
+    --monticulo: #37352a;
+    --seto: #2b4733;
+    --seto-claro: #284232;
+    --luna: #e8e4c9;
+    --madera: #4f3a26;
+    --madera-borde: #d9b78c;
+    --madera-veta: #6c5136;
+    --hoja-viva: #2a4325;
+    --hoja-viva-borde: #a6cf5a;
+    --hoja-viva-nervio: #44663a;
+    --canto-rodado: #3f3f3a;
+    --canto-rodado-borde: #c9c6bb;
+    --canto-rodado-mota: #5d5c55;
+    --sobre: #463a20;
+    --sobre-borde: #e0b54e;
+    --sobre-doblez: #6d5a30;
+    --cielo: #172231;
+    --tierra-cama: #3a2a1e;
+    --tierra-cama-surco: #2a1e15;
+    --sombra-maceta: rgb(0 0 0 / 0.45);
+    --estaca: #7a5c3d;
+    --estaca-borde: #2a1d12;
+    --raya-cuaderno: #35424a;
+    --anilla: #8c8a80;
+    --papel-etiqueta: #f3ecd6;
+    --borde-etiqueta: #8f8466;
+    --brillo-etiqueta: rgb(243 226 160 / 0.28);
+    --sol: transparent;
+    --sol-rayo: transparent;
+    --nube: #4a5666;
+    --nube-borde: #8796a8;
+    --nube-tormenta: #2e3540;
+    --nube-tormenta-borde: #75828f;
+    --lluvia: #7fa5c6;
+    --rayo: #f2c53d;
+    --rayo-borde: #f7dc85;
+    --cielo-nublado: #131c28;
+    --cielo-tormenta: #0f1620;
+    --falla-madera: #f3b4c4;
+  }
+}
+
+:root[data-tema="oscuro"] {
+  color-scheme: dark;
+  --suelo: #18211c;
+  --hoja: #1f2a23;
+  --velo-recoger: #22332a;
+  --tinta: #e6ebe1;
+  --tinta-suave: #a9b3a4;
+  --linea: #6f7b6c;
+  --surco: #3d4c41;
+  --musgo: #6fb585;
+  --musgo-hondo: #7cc796;
+  --brote: #a6cf5a;
+  --brote-trazo: #c3e38a;
+  --trigo: #e0b54e;
+  --trigo-trazo: #f0d08a;
+  --trigo-texto: #e0b54e;
+  --remolacha: #e68aa3;
+  --semilla: #b79572;
+  --sobre-acento: #10261a;
+  --foco: #7cc796;
+  --velo-dialogo: rgb(0 0 0 / 0.6);
+  --papel: #222b25;
+  --tierra-maceta: #3b2c20;
+  --barro: #b5653f;
+  --barro-borde: #94502f;
+  --vidriado: #4c7a80;
+  --vidriado-borde: #3a6166;
+  --piedra: #8c8a80;
+  --piedra-borde: #6f6d64;
+  --brillo: rgb(255 255 255 / 0.35);
+  --flor-clara: #f0dc9e;
+  --margen: #6b3f4b;
+  --tierra-escena: #2a2920;
+  --monticulo: #37352a;
+  --seto: #2b4733;
+  --seto-claro: #284232;
+  --luna: #e8e4c9;
+  --madera: #4f3a26;
+  --madera-borde: #d9b78c;
+  --madera-veta: #6c5136;
+  --hoja-viva: #2a4325;
+  --hoja-viva-borde: #a6cf5a;
+  --hoja-viva-nervio: #44663a;
+  --canto-rodado: #3f3f3a;
+  --canto-rodado-borde: #c9c6bb;
+  --canto-rodado-mota: #5d5c55;
+  --sobre: #463a20;
+  --sobre-borde: #e0b54e;
+  --sobre-doblez: #6d5a30;
+  --cielo: #172231;
+  --tierra-cama: #3a2a1e;
+  --tierra-cama-surco: #2a1e15;
+  --sombra-maceta: rgb(0 0 0 / 0.45);
+  --estaca: #7a5c3d;
+  --estaca-borde: #2a1d12;
+  --raya-cuaderno: #35424a;
+  --anilla: #8c8a80;
+  --papel-etiqueta: #f3ecd6;
+  --borde-etiqueta: #8f8466;
+  --brillo-etiqueta: rgb(243 226 160 / 0.28);
+  --sol: transparent;
+  --sol-rayo: transparent;
+  --nube: #4a5666;
+  --nube-borde: #8796a8;
+  --nube-tormenta: #2e3540;
+  --nube-tormenta-borde: #75828f;
+  --lluvia: #7fa5c6;
+  --rayo: #f2c53d;
+  --rayo-borde: #f7dc85;
+  --cielo-nublado: #131c28;
+  --cielo-tormenta: #0f1620;
+  --falla-madera: #f3b4c4;
+}
+
+/* ---------------------------------------------------------------- Base */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Todas las páginas son la misma escena: el cielo con la cabecera, el
+ * seto y, debajo, el suelo del jardín hasta el final de la pantalla. */
+body {
+  margin: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--tierra-escena);
+  color: var(--tinta);
+  font-family: var(--fuente-texto);
+  font-size: 1.0625rem;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--fuente-titulos);
+  line-height: 1.15;
+  margin: 0;
+  font-variant-numeric: lining-nums;
+}
+
+h1 {
+  font-weight: 400;
+}
+
+h2 {
+  font-weight: 700;
+  font-size: 1.4rem;
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--musgo-hondo);
+  text-underline-offset: 3px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--foco);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+/* Solo para lectores de pantalla. */
+.solo-lectores {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.saltar {
+  position: absolute;
+  left: var(--esp-4);
+  top: -4rem;
+  padding: var(--esp-2) var(--esp-4);
+  background: var(--hoja);
+  color: var(--tinta);
+  z-index: 10;
+}
+
+.saltar:focus {
+  top: var(--esp-2);
+}
+
+.explica {
+  color: var(--tinta-suave);
+  max-width: 68ch;
+}
+
+.vacio,
+.cargando {
+  color: var(--tinta-suave);
+}
+
+.nota {
+  color: var(--tinta-suave);
+  font-size: 0.95rem;
+}
+
+.error {
+  color: var(--remolacha);
+  font-weight: 500;
+}
+
+.error:empty {
+  display: none;
+}
+
+/* ---------------------------------------------------------------- Botones */
+
+/* Por defecto, botones de texto: tranquilos, se subrayan al pasar. */
+.boton {
+  font: inherit;
+  font-weight: 500;
+  color: var(--musgo-hondo);
+  background: none;
+  border: 0;
+  padding: var(--esp-2) 0;
+  min-height: 2.75rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 4px;
+}
+
+.boton:hover {
+  text-decoration-color: currentColor;
+}
+
+.boton:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.boton-plano {
+  color: var(--tinta-suave);
+}
+
+.boton-peligro {
+  color: var(--remolacha);
+}
+
+/* Lo principal de un formulario (Entrar, Guardar): relleno, canto rodado. */
+.boton-acento,
+.dialogo .boton-peligro {
+  padding: var(--esp-2) var(--esp-5);
+  background: var(--musgo-hondo);
+  color: var(--sobre-acento);
+  border-radius: var(--canto);
+  text-decoration: none;
+}
+
+.dialogo .boton-peligro {
+  background: var(--remolacha);
+}
+
+.boton-acento:hover,
+.dialogo .boton-peligro:hover {
+  text-decoration: underline;
+  text-decoration-color: currentColor;
+}
+
+/* El tema y «Salir»: botones con dibujo, de 44 px. */
+.boton-icono {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+}
+
+.boton-icono:hover {
+  color: var(--tinta);
+}
+
+.boton-icono svg {
+  width: 1.35rem;
+  height: 1.35rem;
+}
+
+.salir-poste,
+.salir-hoja {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.salir-hoja {
+  stroke-width: 1.5;
+}
+
+.tema-borde {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+.tema-mitad {
+  fill: currentColor;
+}
+
+/* ---------------------------------------------------------------- Marco */
+
+/* La cabecera, igual en todas las páginas: sobre el cielo, en la rejilla
+ * común y en una sola fila (también en el móvil). */
+.cabecera {
+  flex: none;
+  background: var(--cielo);
+}
+
+.cabecera-fila,
+.cabecera-estado,
+.mensaje,
+.pagina,
+.pestanas,
+.bancal-cuerpo {
+  width: 100%;
+  max-width: var(--ancho-escena);
+  margin-inline: auto;
+  padding-inline: var(--canal);
+}
+
+.cabecera-fila {
+  display: flex;
+  align-items: center;
+  gap: var(--esp-2) var(--esp-6);
+  min-height: 4rem;
+  padding-block: var(--esp-2);
+}
+
+.marca {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--esp-2);
+  min-height: 2.75rem;
+  color: var(--tinta);
+  text-decoration: none;
+  font-family: var(--fuente-titulos);
+  font-weight: 700;
+  font-size: 1.45rem;
+  white-space: nowrap;
+}
+
+.brote {
+  width: 1.8rem;
+  height: 1.8rem;
+  flex: none;
+}
+
+.brote-tallo,
+.brote-tierra {
+  fill: none;
+  stroke: var(--musgo-hondo);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.brote-tierra {
+  stroke: var(--semilla);
+}
+
+.brote-hoja {
+  fill: var(--musgo);
+}
+
+.brote-hoja2 {
+  fill: var(--brote);
+}
+
+.navegacion {
+  display: flex;
+  gap: var(--esp-5);
+  font-size: 1.05rem;
+}
+
+.navegacion a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  color: var(--tinta-suave);
+  text-decoration: none;
+}
+
+.navegacion a:hover {
+  color: var(--tinta);
+}
+
+/* La sección en la que se está: subrayado ondulado, como un surco. */
+.navegacion a[aria-current="page"] {
+  color: var(--tinta);
+  text-decoration: underline wavy var(--musgo-hondo);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 7px;
+}
+
+.cabecera-fin {
+  margin-left: auto;
+  display: flex;
+  gap: var(--esp-1);
+}
+
+/* En el jardín, el tiempo y los avisos van en la cabecera, debajo de la
+ * fila. */
+.cabecera-estado {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--esp-2) var(--esp-6);
+  padding-bottom: var(--esp-3);
+}
+
+/* El seto: entre el cielo y el suelo, de borde a borde. */
+.seto {
+  display: block;
+  flex: none;
+  width: 100%;
+  height: 2.75rem;
+  background: var(--cielo);
+}
+
+.seto-matas {
+  fill: var(--seto);
+}
+
+.seto-linde {
+  fill: var(--tierra-escena);
+}
+
+.mensaje {
+  flex: none;
+}
+
+.contenido {
+  flex: 1 0 auto;
+  width: 100%;
+  background: var(--tierra-escena);
+}
+
+.pagina {
+  padding-block: var(--esp-5) var(--esp-7);
+}
+
+.titulo-pagina {
+  font-size: 2.4rem;
+  margin-bottom: var(--esp-3);
+}
+
+.aviso-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--esp-2) var(--esp-4);
+  margin-top: var(--esp-3);
+  color: var(--remolacha);
+  font-weight: 500;
+}
+
+/* ---------------------------------------------------------------- El tiempo */
+
+/* El tiempo del jardín, en la cabecera: el cielo dibujado (sol de día,
+ * luna de noche, nubes, tormenta) y un letrero de madera colgado de dos
+ * cuerdas que lo dice. Con nubes o tormenta, el cielo se apaga un poco. */
+.cabecera:has(.tiempo-nublado),
+body:has(.tiempo-nublado) .seto {
+  background: var(--cielo-nublado);
+}
+
+.cabecera:has(.tiempo-tormenta),
+body:has(.tiempo-tormenta) .seto {
+  background: var(--cielo-tormenta);
+}
+
+.tiempo {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--esp-3);
+  min-width: 0;
+  max-width: 44rem;
+}
+
+.cielo-dibujo {
+  flex: none;
+  width: 4.75rem;
+  height: auto;
+  overflow: visible;
+}
+
+.astro-sol {
+  fill: var(--sol);
+}
+
+.astro-rayos {
+  fill: none;
+  stroke: var(--sol-rayo);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
+.astro-luna {
+  fill: var(--luna);
+}
+
+.nube {
+  fill: var(--nube);
+  stroke: var(--nube-borde);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.nube-detras,
+.nube-tormenta {
+  fill: var(--nube-tormenta);
+  stroke: var(--nube-tormenta-borde);
+}
+
+.lluvia {
+  fill: none;
+  stroke: var(--lluvia);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.rayo {
+  fill: var(--rayo);
+  stroke: var(--rayo-borde);
+  stroke-width: 1;
+  stroke-linejoin: round;
+}
+
+.tiempo-letrero {
+  position: relative;
+  min-width: 0;
+  margin-top: 0.85rem;
+  padding: var(--esp-2) var(--esp-4);
+  background: var(--madera);
+  color: var(--tinta);
+  border: 2px solid var(--madera-borde);
+  border-radius: 0.4rem 0.55rem 0.45rem 0.5rem;
+  box-shadow: 0 3px 0 var(--madera-borde);
+  line-height: 1.35;
+}
+
+/* Las dos cuerdas de las que cuelga. */
+.tiempo-letrero::before,
+.tiempo-letrero::after {
+  content: "";
+  position: absolute;
+  top: -0.95rem;
+  width: 2px;
+  height: 0.95rem;
+  background: var(--madera-borde);
+}
+
+.tiempo-letrero::before {
+  left: 1.25rem;
+}
+
+.tiempo-letrero::after {
+  right: 1.25rem;
+}
+
+.tiempo-frase {
+  font-family: var(--fuente-titulos);
+  font-style: italic;
+  font-size: 1.1rem;
+}
+
+.tiempo-nublado .tiempo-frase,
+.tiempo-tormenta .tiempo-frase {
+  color: var(--falla-madera);
+  font-weight: 700;
+}
+
+.tiempo-causa,
+.tiempo-seco {
+  margin-top: var(--esp-1);
+  font-size: 0.95rem;
+}
+
+@media (max-width: 34rem) {
+  .cielo-dibujo {
+    width: 3.25rem;
+  }
+
+  .tiempo-letrero {
+    padding: var(--esp-1) var(--esp-3);
+  }
+
+  .tiempo-frase {
+    font-size: 1rem;
+  }
+
+  .tiempo-causa {
+    font-size: 0.88rem;
+    line-height: 1.3;
+  }
+
+  .cercanas {
+    margin-top: 0;
+  }
+}
+
+.tiempo-seco {
+  font-family: var(--fuente-titulos);
+  font-style: italic;
+  font-size: 1.02rem;
+  color: var(--falla-madera);
+  font-weight: 700;
+}
+
+/* ---------------------------------------------------------------- Jardín */
+
+.cercanas {
+  margin-top: 1.25rem;
+  max-width: 30rem;
+  font-weight: 500;
+}
+
+.cercanas a {
+  color: var(--remolacha);
+}
+
+/* El jardín es una escena que llena la pantalla bajo la cabecera; solo se
+ * desplaza el bancal si las macetas no caben. */
+body:has(.contenido-escena) {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.contenido-escena {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.escena {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* El bancal llena la altura de la escena: con pocas macetas, el cajón de
+ * tierra se alarga hasta abajo y las macetas quedan en medio; con muchas,
+ * varias filas y se desplaza. */
+.escena-bancal {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.escena-bancal > .bancal,
+.bancal-cuerpo {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.bancal-cuerpo {
+  padding-block: var(--esp-2) var(--esp-4);
+}
+
+.bancal-cuerpo > .cama {
+  flex: 1 0 auto;
+}
+
+/* El letrero del bancal: una tablilla de madera clavada en el marco, con
+ * dos clavos. */
+.letrero-bancal {
+  position: relative;
+  z-index: 1;
+  width: fit-content;
+  max-width: min(34rem, 100%);
+  margin: 0 auto -0.4rem;
+  padding: var(--esp-2) var(--esp-6);
+  background: var(--madera);
+  color: var(--tinta);
+  border: 2px solid var(--madera-borde);
+  border-radius: 0.45rem 0.6rem 0.4rem 0.55rem;
+  box-shadow: 0 3px 0 var(--madera-borde);
+  font-family: var(--fuente-titulos);
+  font-style: italic;
+  font-size: 1.05rem;
+  line-height: 1.3;
+  text-align: center;
+}
+
+.letrero-bancal::before,
+.letrero-bancal::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-top: -0.225rem;
+  border-radius: 50%;
+  background: var(--madera-borde);
+}
+
+.letrero-bancal::before {
+  left: 0.8rem;
+}
+
+.letrero-bancal::after {
+  right: 0.8rem;
+}
+
+/* El bancal: un cajón de madera con tierra. Las macetas, repartidas y
+ * centradas; cada una sobre su caballón de tierra. */
+.cama {
+  position: relative;
+  isolation: isolate;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-content: center;
+  background: var(--tierra-cama);
+  border: 0.75rem solid var(--madera);
+  border-bottom: 0;
+  border-radius: 0.35rem 0.35rem 0.2rem 0.2rem;
+  box-shadow:
+    0 0 0 2px var(--madera-borde),
+    inset 0 0.5rem 0 var(--tierra-cama-surco);
+}
+
+/* La tabla de delante del cajón, debajo del todo. */
+.cama::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1.2rem;
+  background: linear-gradient(
+    to bottom,
+    var(--madera-borde) 0 2px,
+    var(--madera) 2px 58%,
+    var(--madera-veta) 58% calc(58% + 1.5px),
+    var(--madera) calc(58% + 1.5px)
+  );
+}
+
+/* Bajo cada maceta, un caballón de tierra donde se clava la estaca (no
+ * una tabla: una fila que no llena el ancho dejaría una tabla suelta en
+ * medio de la tierra). */
+.cama > .maceta::after {
+  content: "";
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  bottom: 0.55rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  background: var(--tierra-cama-surco);
+}
+
+.cama-vacia {
+  display: grid;
+  place-items: center;
+  padding: var(--esp-6) var(--esp-4) calc(var(--esp-6) + 1.2rem);
+}
+
+.cama-vacia .vacio {
+  padding: var(--esp-2) var(--esp-4);
+  background: var(--papel-etiqueta);
+  color: #4d4f42;
+  border: 3px double var(--borde-etiqueta);
+  border-radius: 3px;
+  transform: rotate(-1deg);
+}
+
+.cama > .maceta {
+  position: relative;
+  flex: 0 0 50%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--esp-4) var(--esp-2) 2.1rem;
+}
+
+@media (min-width: 34rem) {
+  .cama > .maceta {
+    flex-basis: 33.333%;
+  }
+}
+
+@media (min-width: 50rem) {
+  .cama > .maceta {
+    flex-basis: 25%;
+  }
+}
+
+@media (min-width: 68rem) {
+  .cama > .maceta {
+    flex-basis: 20%;
+  }
+}
+
+.maceta-tiesto {
+  position: relative;
+  z-index: 1;
+  width: 8rem;
+  cursor: pointer;
+}
+
+/* La sombra de la maceta sobre la tierra. */
+.maceta-tiesto::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  left: 14%;
+  right: 14%;
+  bottom: 0;
+  height: 0.9rem;
+  border-radius: 50%;
+  background: var(--sombra-maceta);
+}
+
+.maceta-dibujo {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+/* La estaca de la etiqueta, clavada delante de la maceta. */
+.estaca {
+  position: absolute;
+  z-index: 0;
+  left: 50%;
+  top: 8rem;
+  bottom: 0.9rem;
+  width: 0.35rem;
+  margin-left: -0.175rem;
+  background: var(--estaca);
+  border-radius: 1px 1px 0 0;
+  box-shadow: inset -1px 0 0 var(--estaca-borde);
+}
+
+
+/* Las pestañas: objetos del huerto. La forma es un SVG que se estira
+ * detrás del texto; la elegida, con el trazo grueso y su sombra dibujada. */
+.pestanas {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--esp-3) var(--esp-5);
+  padding-block: var(--esp-4) var(--esp-3);
+}
+
+.pestana {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: 2.75rem auto;
+  align-items: center;
+  gap: var(--esp-2);
+  min-width: 11.5rem;
+  min-height: 4.25rem;
+  padding: var(--esp-3) var(--esp-5) var(--esp-3) var(--esp-4);
+  color: var(--tinta);
+  text-decoration: none;
+  transform: translateY(2px);
+}
+
+.pestana[aria-selected="true"] {
+  transform: translateY(-2px);
+}
+
+.pestana:focus-visible {
+  outline-offset: 5px;
+  border-radius: 0.6rem;
+}
+
+.pestana-forma {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.pestana-forma path {
+  vector-effect: non-scaling-stroke;
+}
+
+.pestana-silueta {
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.pestana[aria-selected="true"] .pestana-silueta {
+  stroke-width: 3;
+}
+
+.pestana-sombra {
+  opacity: 0;
+  transform: translate(4px, 5px);
+}
+
+.pestana[aria-selected="true"] .pestana-sombra {
+  opacity: 1;
+}
+
+.pestana-detalle {
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.pestana-letrero .pestana-silueta {
+  fill: var(--madera);
+  stroke: var(--madera-borde);
+}
+
+.pestana-letrero .pestana-sombra {
+  fill: var(--madera-borde);
+}
+
+.pestana-letrero .pestana-detalle {
+  stroke: var(--madera-veta);
+}
+
+.pestana-hoja .pestana-silueta {
+  fill: var(--hoja-viva);
+  stroke: var(--hoja-viva-borde);
+}
+
+.pestana-hoja .pestana-sombra {
+  fill: var(--hoja-viva-borde);
+}
+
+.pestana-hoja .pestana-detalle {
+  stroke: var(--hoja-viva-nervio);
+}
+
+.pestana-piedra .pestana-silueta {
+  fill: var(--canto-rodado);
+  stroke: var(--canto-rodado-borde);
+}
+
+.pestana-piedra .pestana-sombra {
+  fill: var(--canto-rodado-borde);
+}
+
+.pestana-piedra .pestana-detalle {
+  fill: var(--canto-rodado-mota);
+  stroke: none;
+}
+
+.pestana-sobre .pestana-silueta {
+  fill: var(--sobre);
+  stroke: var(--sobre-borde);
+}
+
+.pestana-sobre .pestana-sombra {
+  fill: var(--sobre-borde);
+}
+
+.pestana-sobre .pestana-detalle {
+  stroke: var(--sobre-doblez);
+  stroke-dasharray: 4 4;
+}
+
+.pestana-glifo {
+  display: block;
+  width: 2.75rem;
+  height: 2.75rem;
+}
+
+.glifo-tierra {
+  fill: var(--tierra-maceta);
+}
+
+.pestana-texto {
+  display: grid;
+  line-height: 1.15;
+}
+
+.pestana-nombre {
+  font-family: var(--fuente-titulos);
+  font-style: italic;
+  font-size: 1.2rem;
+}
+
+.nombre-corto {
+  display: none;
+}
+
+/* A medio ancho, las cuatro en una fila con el nombre corto (el nombre
+ * entero sigue en su `aria-label`). */
+@media (max-width: 64rem) {
+  .pestanas {
+    flex-wrap: nowrap;
+    gap: var(--esp-3);
+  }
+
+  .pestana {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: 13rem;
+    padding-inline: var(--esp-3) var(--esp-4);
+  }
+
+  .nombre-largo {
+    display: none;
+  }
+
+  .nombre-corto {
+    display: inline;
+  }
+}
+
+.pestana-cuenta {
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+
+/* Tiestos: barro para las películas, vidriado para las series, piedra
+ * para lo demás. */
+.tiesto-tierra {
+  fill: var(--tierra-maceta);
+}
+
+.tiesto-barro .tiesto-cuerpo {
+  fill: var(--barro);
+}
+
+.tiesto-barro .tiesto-borde,
+.tiesto-veta {
+  fill: var(--barro-borde);
+}
+
+.tiesto-veta {
+  fill: none;
+  stroke: var(--barro-borde);
+  stroke-width: 1.2;
+  stroke-linecap: round;
+}
+
+.tiesto-vidriado .tiesto-cuerpo {
+  fill: var(--vidriado);
+}
+
+.tiesto-vidriado .tiesto-borde {
+  fill: var(--vidriado-borde);
+}
+
+.tiesto-brillo {
+  fill: none;
+  stroke: var(--brillo);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+}
+
+.tiesto-piedra .tiesto-cuerpo {
+  fill: var(--piedra);
+}
+
+.tiesto-piedra .tiesto-borde,
+.tiesto-mota {
+  fill: var(--piedra-borde);
+}
+
+/* Las plantas. */
+.planta-tallo {
+  fill: none;
+  stroke: var(--musgo-hondo);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+
+.planta-hoja {
+  fill: var(--musgo);
+}
+
+.planta-hoja-clara {
+  fill: var(--brote);
+}
+
+.planta-nervio {
+  fill: none;
+  stroke: var(--musgo-hondo);
+  stroke-width: 0.6;
+  stroke-linecap: round;
+  stroke-opacity: 0.6;
+}
+
+.planta-capullo {
+  fill: var(--brote-trazo);
+}
+
+.planta-flor {
+  fill: var(--trigo);
+}
+
+.planta-flor-otra {
+  fill: var(--flor-clara);
+}
+
+.planta-corazon {
+  fill: var(--brote-trazo);
+}
+
+.planta-semilla {
+  fill: var(--semilla);
+}
+
+.planta-surco {
+  fill: none;
+  stroke: var(--semilla);
+  stroke-width: 1.1;
+  stroke-linecap: round;
+}
+
+
+/* La etiqueta de herbolario: un papel claro con doble filete, algo
+ * torcido, en lo alto de su estaca. Es clara de día y de noche (como
+ * iluminada), así que lleva sus propios colores de tinta. */
+.etiqueta,
+.acceso-caja,
+.cama-vacia .vacio,
+.pliego,
+.dialogo {
+  --tinta: #2a2b22;
+  --tinta-suave: #4d4f42;
+  --remolacha: #9b2d4a;
+  --musgo-hondo: #2f6b43;
+  --trigo-texto: #7a5812;
+  --foco: #2f6b43;
+  --hoja: #fffdf6;
+  --linea: #7d8873;
+  --sobre-acento: #ffffff;
+}
+
+.etiqueta {
+  position: relative;
+  z-index: 2;
+  width: min(100%, 10.5rem);
+  margin-top: 0.4rem;
+  padding: var(--esp-1) var(--esp-2) var(--esp-1);
+  background: var(--papel-etiqueta);
+  color: var(--tinta);
+  border: 3px double var(--borde-etiqueta);
+  border-radius: 3px;
+  box-shadow: 0 2px 0.6rem var(--brillo-etiqueta);
+  font-size: 0.92rem;
+  line-height: 1.3;
+  text-align: center;
+}
+
+.giro-0 {
+  transform: rotate(-1.4deg);
+}
+
+.giro-1 {
+  transform: rotate(0.9deg);
+}
+
+.giro-2 {
+  transform: rotate(-0.5deg);
+}
+
+.giro-3 {
+  transform: rotate(1.5deg);
+}
+
+.etiqueta-aviso {
+  border-color: var(--remolacha);
+}
+
+.nombre-planta {
+  font-family: var(--fuente-titulos);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 1.05rem;
+  line-height: 1.2;
+}
+
+.abrir-ficha {
+  font: inherit;
+  color: inherit;
+  width: 100%;
+  min-height: 2.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.nombre-texto {
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.abrir-ficha:hover .nombre-texto {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.estado-planta {
+  color: var(--tinta-suave);
+}
+
+.maceta-recoger .estado-planta {
+  color: var(--musgo-hondo);
+  font-weight: 500;
+}
+
+.pausa {
+  color: var(--trigo-texto);
+  font-weight: 500;
+}
+
+.aviso-planta {
+  color: var(--remolacha);
+  font-weight: 500;
+}
+
+.acciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--esp-5);
+}
+
+.acciones-planta {
+  justify-content: center;
+  gap: 0 var(--esp-3);
+}
+
+
+/* La ficha de una maceta: un pliego de herbario. La planta va montada
+ * en el papel con dos tiras de cinta; abajo, su etiqueta con doble filete
+ * y los datos en renglones, como en los pliegos de verdad. Papel claro
+ * también de noche, como las etiquetas. */
+.dialogo.ficha {
+  width: min(42rem, calc(100% - 1.5rem));
+  max-height: calc(100dvh - 1.5rem);
+  padding: 0;
+  background: none;
+  border: 0;
+  overflow: visible;
+}
+
+.pliego {
+  display: grid;
+  grid-template-columns: minmax(9rem, 14rem) minmax(0, 1fr);
+  grid-template-areas:
+    "planta cerrar"
+    "planta etiqueta"
+    "acciones acciones";
+  align-items: end;
+  gap: var(--esp-3) var(--esp-5);
+  max-height: calc(100dvh - 1.5rem);
+  overflow-y: auto;
+  padding: var(--esp-4) var(--esp-5) var(--esp-4);
+  background: var(--papel-etiqueta);
+  color: var(--tinta);
+  border: 1px solid var(--borde-etiqueta);
+  border-radius: 2px;
+  box-shadow: 0 0.4rem 1.6rem rgb(0 0 0 / 0.28);
+}
+
+.ficha-cerrar {
+  grid-area: cerrar;
+  align-self: start;
+  justify-self: end;
+  padding-inline: var(--esp-3);
+  margin-right: calc(-1 * var(--esp-3));
+}
+
+.pliego-planta {
+  grid-area: planta;
+  position: relative;
+  align-self: center;
+  padding: var(--esp-2) var(--esp-3) 0;
+}
+
+.pliego-planta .maceta-dibujo {
+  width: 100%;
+}
+
+/* Las tiras de cinta que sujetan la planta al papel. */
+.cinta {
+  position: absolute;
+  z-index: 1;
+  width: 2.8rem;
+  height: 0.85rem;
+  background: rgb(236 224 186 / 0.8);
+  border: 1px solid rgb(143 132 102 / 0.45);
+}
+
+/* Cruzan el tallo (en el centro del dibujo), una arriba y otra abajo. */
+.cinta-izquierda {
+  top: 36%;
+  left: calc(50% - 1.3rem);
+  transform: rotate(-16deg);
+}
+
+.cinta-derecha {
+  top: 55%;
+  left: calc(50% - 1.6rem);
+  transform: rotate(11deg);
+}
+
+.pliego-etiqueta {
+  grid-area: etiqueta;
+  padding: var(--esp-3) var(--esp-4);
+  background: var(--hoja);
+  border: 3px double var(--borde-etiqueta);
+  border-radius: 2px;
+}
+
+.ficha-nombre {
+  font-style: italic;
+  font-weight: 400;
+  font-size: 1.45rem;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  margin-bottom: var(--esp-2);
+}
+
+.ficha-datos {
+  margin: 0;
+  display: grid;
+}
+
+.ficha-dato {
+  display: grid;
+  grid-template-columns: 5.25rem minmax(0, 1fr);
+  gap: var(--esp-3);
+  padding-block: 0.3rem;
+  border-bottom: 1px dotted var(--borde-etiqueta);
+}
+
+.ficha-dato dt {
+  font-family: var(--fuente-titulos);
+  font-style: italic;
+  color: var(--tinta-suave);
+}
+
+.ficha-dato dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.ficha-aviso dd {
+  color: var(--remolacha);
+  font-weight: 500;
+}
+
+.ficha-exenciones {
+  list-style: none;
+  margin: var(--esp-2) 0 0;
+  padding: 0;
+  font-size: 0.95rem;
+}
+
+.ficha-acciones {
+  grid-area: acciones;
+  padding-top: var(--esp-2);
+  border-top: 1px solid var(--borde-etiqueta);
+}
+
+@media (max-width: 34rem) {
+  .pliego {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "cerrar"
+      "planta"
+      "etiqueta"
+      "acciones";
+    padding-inline: var(--esp-4);
+  }
+
+  .pliego-planta {
+    width: 9.5rem;
+    justify-self: center;
+    padding-top: 0;
+  }
+}
+
+/* El único movimiento sin que nadie lo pida: las plantas crecen una vez
+ * al llegar. Y, al recoger una, la maceta se levanta y se va. */
+@media (prefers-reduced-motion: no-preference) {
+  /* Al abrir la ficha, el pliego se posa sobre la mesa. */
+  .ficha[open] .pliego {
+    animation: posar 200ms ease-out both;
+  }
+
+  .planta-brota {
+    transform-box: fill-box;
+    transform-origin: 50% 100%;
+    animation: brotar 900ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  }
+
+  .macetas > :nth-child(3n + 2) .planta-brota {
+    animation-delay: 90ms;
+  }
+
+  .macetas > :nth-child(3n) .planta-brota {
+    animation-delay: 180ms;
+  }
+
+  .maceta-sale {
+    animation: salir 420ms ease-in forwards;
+  }
+
+  .entra-derecha {
+    animation: entrar-derecha 280ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  }
+
+  .entra-izquierda {
+    animation: entrar-izquierda 280ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  }
+
+  .pestana {
+    transition: transform 160ms ease-out;
+  }
+}
+
+@keyframes entrar-derecha {
+  from {
+    transform: translateX(3rem);
+    opacity: 0;
+  }
+}
+
+@keyframes entrar-izquierda {
+  from {
+    transform: translateX(-3rem);
+    opacity: 0;
+  }
+}
+
+@keyframes posar {
+  from {
+    opacity: 0;
+    transform: translateY(0.6rem) rotate(-0.6deg);
+  }
+}
+
+@keyframes brotar {
+  from {
+    transform: scale(0.1);
+    opacity: 0;
+  }
+
+  40% {
+    opacity: 1;
+  }
+
+  to {
+    transform: none;
+  }
+}
+
+@keyframes salir {
+  to {
+    transform: translateY(-1.5rem);
+    opacity: 0;
+  }
+}
+
+/* ---------------------------------------------------------------- Listas */
+
+.exenciones,
+.historial {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* ---------------------------------------------------------------- Reglas */
+
+.pagina > .explica {
+  margin-bottom: var(--esp-5);
+}
+
+.modo {
+  margin: var(--esp-5) 0 var(--esp-6);
+}
+
+.modo h2 {
+  margin-bottom: var(--esp-4);
+}
+
+/* «Solo aviso» y «Borrado real»: dos letreros de madera clavados en el
+ * suelo, cada uno en su poste; el elegido, más firme y con su marca. */
+.letreros-modo {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 23rem));
+  gap: var(--esp-5) var(--esp-6);
+  padding-bottom: 1.4rem;
+}
+
+.letrero-modo {
+  --tinta-suave: var(--tinta);
+  position: relative;
+  font: inherit;
+  color: var(--tinta);
+  text-align: left;
+  display: grid;
+  align-content: start;
+  gap: var(--esp-1);
+  padding: var(--esp-3) var(--esp-4) var(--esp-4);
+  background: var(--madera);
+  border: 2px solid var(--madera-borde);
+  border-radius: 0.5rem 0.7rem 0.45rem 0.6rem;
+  box-shadow: 0 3px 0 var(--madera-borde);
+  cursor: pointer;
+}
+
+/* El poste. */
+.letrero-modo::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 0.7rem;
+  height: 1.4rem;
+  margin-left: -0.35rem;
+  background: var(--estaca);
+  border: 1.5px solid var(--madera-borde);
+  border-top: 0;
+}
+
+.letrero-modo:hover {
+  box-shadow: 0 3px 0 var(--madera-borde), 0 0 0 1.5px var(--madera-borde);
+}
+
+.letrero-elegido {
+  border-width: 3px;
+  box-shadow: 0 5px 0 var(--madera-borde);
+  transform: translateY(-3px);
+  cursor: default;
+}
+
+.letrero-titulo {
+  font-family: var(--fuente-titulos);
+  font-weight: 700;
+  font-size: 1.2rem;
+  display: flex;
+  align-items: center;
+  gap: var(--esp-2);
+}
+
+/* La marca de la opción: un círculo pintado; relleno en la elegida. */
+.letrero-titulo::before {
+  content: "";
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 50%;
+  border: 2px solid var(--madera-borde);
+  flex: none;
+}
+
+.letrero-elegido .letrero-titulo::before {
+  background: var(--musgo-hondo);
+  border-color: var(--musgo-hondo);
+  box-shadow: inset 0 0 0 2px var(--madera);
+}
+
+.letrero-texto {
+  color: var(--tinta);
+}
+
+/* Las reglas de cada categoría, en su sobre de semillas: papel con el
+ * borde de arriba dentado. */
+.categorias {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(19rem, 100%), 1fr));
+  gap: var(--esp-6) var(--esp-5);
+  margin-top: var(--esp-6);
+}
+
+.tablilla {
+  position: relative;
+  margin-top: 0.7rem;
+  padding: var(--esp-3) var(--esp-4) var(--esp-4);
+  background: var(--sobre);
+  border: 2px solid var(--sobre-borde);
+  border-top: 0;
+  border-radius: 0 0 0.4rem 0.55rem;
+}
+
+.tablilla::before {
+  content: "";
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  top: -0.7rem;
+  height: 0.7rem;
+  background:
+    linear-gradient(-45deg, var(--sobre) 0.35rem, transparent 0) 0 100% / 0.7rem 0.7rem repeat-x,
+    linear-gradient(45deg, var(--sobre) 0.35rem, transparent 0) 0 100% / 0.7rem 0.7rem repeat-x;
+}
+
+.categoria h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--esp-2);
+  margin-bottom: var(--esp-3);
+  padding-bottom: var(--esp-2);
+  border-bottom: 1.5px dashed var(--sobre-doblez);
+}
+
+.tiesto-icono {
+  width: 2.4rem;
+  height: auto;
+  flex: none;
+}
+
+.categoria form {
+  display: grid;
+  gap: var(--esp-3);
+}
+
+.regla {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: var(--esp-1) var(--esp-3);
+}
+
+.regla-nombre {
+  font-weight: 700;
+  min-height: 2.75rem;
+  display: flex;
+  align-items: center;
+}
+
+.regla-valor {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--esp-2);
+  color: var(--tinta-suave);
+}
+
+.regla-valor input {
+  width: 5.5rem;
+}
+
+.regla-valor input:disabled {
+  opacity: 0.6;
+}
+
+/* El interruptor: un brote que se enciende (nativo por debajo). */
+.interruptor {
+  appearance: none;
+  margin: 0;
+  width: 2.75rem;
+  height: 1.6rem;
+  border-radius: 1rem 0.8rem 1rem 0.8rem;
+  border: 2px solid var(--sobre-borde);
+  background: var(--hoja);
+  position: relative;
+  cursor: pointer;
+}
+
+.interruptor::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(1.6rem - 8px);
+  height: calc(1.6rem - 8px);
+  border-radius: 50% 10% 50% 10%;
+  background: var(--linea);
+}
+
+.interruptor:checked {
+  background: var(--musgo-hondo);
+  border-color: var(--musgo-hondo);
+}
+
+.interruptor:checked::after {
+  left: auto;
+  right: 2px;
+  background: var(--sobre-acento);
+}
+
+.categoria-pie {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--esp-3) var(--esp-5);
+}
+
+.estado-guardar {
+  color: var(--musgo-hondo);
+}
+
+.estado-guardar.error {
+  color: var(--remolacha);
+}
+
+.estado-guardar:empty {
+  display: none;
+}
+
+/* Los «No recoger» vigentes, en una nota de papel. */
+.exenciones-nota {
+  max-width: 46rem;
+  margin-top: var(--esp-7);
+  padding: var(--esp-4) var(--esp-5);
+  background: var(--papel);
+  border: 3px double var(--linea);
+  border-radius: 3px;
+}
+
+.exenciones-nota .explica {
+  margin: var(--esp-1) 0 var(--esp-3);
+}
+
+.exencion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--esp-4);
+  margin-bottom: var(--esp-2);
+}
+
+.exencion-nombre {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+/* Las normas del tracker: las mismas cifras que las reglas, sin
+ * interruptor (siempre cuentan). */
+.normas form {
+  display: grid;
+  gap: var(--esp-2);
+}
+
+.normas .nota {
+  margin: 0 0 var(--esp-3);
+}
+
+/* Los presets, en otra nota de papel como la de «No recoger». */
+.presets-lista {
+  list-style: none;
+  margin: var(--esp-3) 0 0;
+  padding: 0;
+}
+
+.preset {
+  padding: var(--esp-3) 0;
+  border-top: 1.5px dashed var(--linea);
+}
+
+.preset p {
+  margin: 0;
+}
+
+.preset-nombre {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.preset-incluido {
+  margin-left: var(--esp-2);
+  padding: 0 var(--esp-2);
+  font-size: 0.85rem;
+  color: var(--tinta-suave);
+  border: 1.5px solid var(--linea);
+  border-radius: 0.6rem 0.4rem 0.55rem 0.35rem;
+}
+
+.preset .nota {
+  overflow-wrap: anywhere;
+}
+
+.preset-botones {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--esp-5);
+}
+
+/* «Subir preset»: la etiqueta hace de botón; el campo de archivo, oculto,
+ * enseña el foco en ella. */
+.archivo-preset:focus-visible + label {
+  outline: 2px solid var(--foco);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+.preset-form {
+  display: grid;
+  gap: var(--esp-3);
+  margin: var(--esp-3) 0;
+  max-width: 32rem;
+}
+
+/* ---------------------------------------------------------------- Historial */
+
+/* El cuaderno del jardinero: una hoja de papel pautado con sus anillas
+ * arriba; un suceso por renglón y la fecha en cursiva. */
+.cuaderno {
+  position: relative;
+  max-width: 46rem;
+  margin-top: var(--esp-4);
+  padding: 2.25rem var(--esp-5) var(--esp-5);
+  background-color: var(--papel);
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0 calc(2rem - 1px),
+    var(--raya-cuaderno) calc(2rem - 1px) 2rem
+  );
+  background-position: 0 2.25rem;
+  background-repeat: repeat-y;
+  background-size: 100% calc(100% - 2.25rem);
+  border: 1.5px solid var(--linea);
+  border-radius: 2px 2px 4px 4px;
+  box-shadow: 0 4px 0 var(--surco);
+  transform: rotate(-0.4deg);
+}
+
+/* Las anillas. */
+.cuaderno::before {
+  content: "";
+  position: absolute;
+  left: var(--esp-5);
+  right: var(--esp-5);
+  top: 0.6rem;
+  height: 0.8rem;
+  background: radial-gradient(circle, var(--anilla) 0 0.28rem, transparent 0.3rem) 0 0 / 1.6rem 0.8rem repeat-x;
+}
+
+.linea {
+  display: grid;
+  grid-template-columns: 7.5rem 1fr;
+  gap: 0 var(--esp-4);
+  line-height: 2rem;
+}
+
+.linea-cuando {
+  font-family: var(--fuente-titulos);
+  font-style: italic;
+  color: var(--tinta-suave);
+  grid-row: span 2;
+}
+
+.linea-quien {
+  overflow-wrap: anywhere;
+}
+
+.linea-quien-general {
+  color: var(--tinta-suave);
+}
+
+.linea-detalle {
+  grid-column: 2;
+  color: var(--tinta-suave);
+}
+
+.linea-detalle:empty {
+  display: none;
+}
+
+.linea-borrado .linea-suceso {
+  color: var(--remolacha);
+}
+
+.linea-aviso .linea-suceso {
+  color: var(--trigo-texto);
+}
+
+.cuaderno-vacio {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  line-height: 2rem;
+}
+
+.cuaderno-vacio .vacio {
+  font-family: var(--fuente-titulos);
+  font-style: italic;
+  font-size: 1.2rem;
+  color: var(--tinta);
+}
+
+.plantones {
+  width: 8rem;
+  height: auto;
+}
+
+.plantones-tierra,
+.plantones-tallo {
+  fill: none;
+  stroke: var(--semilla);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.plantones-tallo {
+  stroke: var(--musgo-hondo);
+  stroke-width: 1.8;
+}
+
+.plantones-hoja {
+  fill: var(--musgo);
+}
+
+.plantones-lapiz {
+  fill: var(--trigo);
+  stroke: var(--trigo-trazo);
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+}
+
+
+/* ---------------------------------------------------------------- Diálogo y campos */
+
+/* El diálogo de confirmar: una hoja de papel, como las etiquetas. */
+.dialogo {
+  width: min(30rem, calc(100% - 2rem));
+  padding: var(--esp-5);
+  color: var(--tinta);
+  background: var(--papel-etiqueta);
+  border: 3px double var(--borde-etiqueta);
+  border-radius: 2px;
+  box-shadow: 0 0.4rem 1.6rem rgb(0 0 0 / 0.28);
+}
+
+.dialogo::backdrop {
+  background: var(--velo-dialogo);
+}
+
+.dialogo form {
+  display: grid;
+  gap: var(--esp-4);
+}
+
+.dialogo h2 {
+  font-size: 1.5rem;
+}
+
+.botones {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--esp-3) var(--esp-5);
+}
+
+.campo {
+  display: grid;
+  gap: var(--esp-1);
+}
+
+.campo label {
+  font-weight: 500;
+}
+
+.campo input,
+.regla-valor input {
+  font: inherit;
+  color: var(--tinta);
+  background: var(--hoja);
+  border: 1.5px solid var(--linea);
+  border-radius: 0.5rem 0.4rem 0.55rem 0.35rem;
+  padding: var(--esp-2) var(--esp-3);
+}
+
+/* ---------------------------------------------------------------- Acceso */
+
+/* El acceso: una etiqueta grande clavada en el suelo del jardín. */
+.acceso {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--esp-6) var(--canal) var(--esp-7);
+}
+
+.acceso-caja {
+  position: relative;
+  z-index: 1;
+  width: min(24rem, 100%);
+  padding: var(--esp-5);
+  background: var(--papel-etiqueta);
+  color: var(--tinta);
+  border: 3px double var(--borde-etiqueta);
+  border-radius: 3px;
+  box-shadow: 0 3px 0.8rem var(--brillo-etiqueta);
+}
+
+.acceso-caja form {
+  display: grid;
+  gap: var(--esp-4);
+  margin: var(--esp-4) 0;
+}
+
+.acceso h1 {
+  font-size: 2.2rem;
+}
+
+.acceso .boton-acento {
+  justify-self: start;
+}
+
+.acceso-caja a {
+  color: var(--musgo-hondo);
+}
+
+.acceso-estaca {
+  position: static;
+  display: block;
+  width: 0.6rem;
+  height: 3.5rem;
+  margin: -2px 0 0;
+}
+
+/* ---------------------------------------------------------------- Pantallas estrechas */
+
+@media (max-width: 40rem) {
+  :root {
+    --canal: 0.75rem;
+  }
+
+  /* La cabecera, en una fila: el brote y el nombre, las tres secciones y
+   * los dos botones con dibujo. */
+  .cabecera-fila {
+    gap: 0 var(--esp-3);
+    min-height: 3.25rem;
+    padding-block: var(--esp-1);
+  }
+
+  .marca {
+    gap: var(--esp-1);
+    font-size: 1.1rem;
+  }
+
+  .brote {
+    width: 1.35rem;
+    height: 1.35rem;
+  }
+
+  .navegacion {
+    gap: var(--esp-3);
+    font-size: 0.98rem;
+  }
+
+  .cabecera-fin {
+    gap: 0;
+    margin-right: calc(-1 * var(--esp-2));
+  }
+
+  .seto {
+    height: 2rem;
+  }
+
+  /* En el móvil, las pestañas abajo, al alcance del pulgar. */
+  .pestanas {
+    order: 2;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--esp-2);
+    padding: var(--esp-3) var(--esp-2) max(var(--esp-3), env(safe-area-inset-bottom));
+    background: var(--tierra-escena);
+  }
+
+  .pestana {
+    min-width: 0;
+    min-height: 0;
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+    gap: 0;
+    padding: var(--esp-2) var(--esp-1) var(--esp-2);
+  }
+
+  .pestana-glifo {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .pestana-nombre {
+    font-size: 1rem;
+  }
+
+  .nombre-largo {
+    display: none;
+  }
+
+  .nombre-corto {
+    display: inline;
+  }
+
+  .bancal-cuerpo {
+    padding-block: var(--esp-3) var(--esp-5);
+  }
+
+  .letrero-bancal {
+    padding-inline: var(--esp-5);
+    font-size: 0.98rem;
+  }
+
+  .cama {
+    border-width: 0.55rem;
+    border-bottom: 0;
+  }
+
+  .maceta-tiesto {
+    width: 6.25rem;
+  }
+
+  .estaca {
+    top: 6.5rem;
+  }
+
+  .titulo-pagina {
+    font-size: 2rem;
+  }
+
+  .letreros-modo {
+    grid-template-columns: 1fr;
+  }
+
+  .cuaderno {
+    padding-inline: var(--esp-4);
+  }
+
+  .linea {
+    grid-template-columns: 1fr;
+  }
+
+  .linea-cuando {
+    grid-row: auto;
+  }
+
+  .linea-detalle {
+    grid-column: 1;
+  }
+}

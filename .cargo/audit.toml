@@ -1,0 +1,7 @@
+# cargo audit lee Cargo.lock, que guarda también las dependencias opcionales
+# que no se compilan. RUSTSEC-2023-0071 es de rsa, que solo llega por
+# sqlx-mysql: semillero usa SQLite y rsa no entra en el binario
+# (cargo tree -i rsa --all-features no lo muestra). cargo deny, que mira las
+# dependencias de verdad, no lo marca.
+[advisories]
+ignore = ["RUSTSEC-2023-0071"]

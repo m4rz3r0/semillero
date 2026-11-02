@@ -1,0 +1,71 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.13", default-features = false }
+tokio = { version = "1", features = ["sync", "time", "macros", "rt-multi-thread", "net"] }
+axum = "0.8"
+form_urlencoded = "1"
+thiserror = "2"
+leptos = "0.8.22"
+leptos_axum = "0.8.10"
+leptos_meta = "0.8"
+leptos_router = "0.8"
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate"] }
+tower = "0.5"
+wasm-bindgen = "=0.2.129"
+console_error_panic_hook = "0.1"
+sha2 = "0.10"
+base64 = "0.22"
+getrandom = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "std", "ansi"] }
+tempfile = "3"
+toml = "1"
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.release]
+codegen-units = 1
+lto = true
+
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+# Compilación con cargo-leptos.
+[[workspace.metadata.leptos]]
+name = "semillero"
+bin-package = "semillero"
+lib-package = "semillero"
+site-root = "target/site"
+site-pkg-dir = "pkg"
+style-file = "crates/semillero/style/main.css"
+assets-dir = "crates/semillero/public"
+site-addr = "127.0.0.1:3000"
+reload-port = 3001
+bin-features = ["ssr"]
+bin-default-features = false
+lib-features = ["hydrate"]
+lib-default-features = false
+lib-profile-release = "wasm-release"
+env = "DEV"
+# Hash del contenido en los nombres del wasm, el JS y el CSS; los hashes van a
+# target/site/hash.txt (ruta relativa a target/<perfil>), dentro de la web.
+hash-files = true
+hash-file-name = "../site/hash.txt"

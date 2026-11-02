@@ -1,0 +1,23 @@
+# Configuración del equipo de trabajo para compilar en el PC de compilación
+# y entregar al buzón del servidor (deploy/cross/lanzar.sh).
+#
+# Cópiala a deploy/config.local (git la ignora) y cambia los valores. Es sh:
+# CLAVE=valor, con comillas si el valor lleva espacios o «$». También puedes
+# dejar en config.local solo lo que cambia, empezando por la línea
+#   . "$CONFIG_EJEMPLO"
+# que carga este fichero.
+#
+# Los valores de aquí son de documentación (*.example): no funcionan tal cual.
+
+# Cómo se entra por SSH al PC de compilación desde este equipo (usuario@equipo
+# o un Host de ~/.ssh/config).
+PC_COMPILAR_SSH=usuario@pc-compilacion.example
+
+# Cómo llega el PC al usuario del buzón del servidor (smentrega), con la IP o
+# el nombre del servidor tal como los ve el PC.
+PRECOMPILADAS_BUZON_SSH=smentrega@servidor.example
+
+# Repositorio del que trae las etiquetas el temporizador opcional del PC
+# (semillero-cross.timer). lanzar.sh no lo usa: manda la etiqueta en un
+# git bundle.
+REPO_URL=ssh://git@git.example:2200/usuario/semillero.git

@@ -1,0 +1,27 @@
+# Lista de permitidos de tools/publicar/escanear.sh. Cada entrada lleva
+# tipo, valor y motivo (sin motivo, el escáner se niega a seguir):
+#   ip       dirección o red IPv4 (a.b.c.d/n); IPv6, solo la dirección exacta
+#   dominio  dominio público (vale también para sus subdominios)
+#   correo   dirección exacta
+#   ruta     prefijo exacto /home/<usuario>/ o /Users/<usuario>/
+#   binario  patrón de ruta (glob) de ficheros binarios que pueden salir
+# Mantenla corta: lo que no es de documentación tiene que justificarse.
+
+ip       127.0.0.0/8   bucle local: el servicio y las pruebas escuchan en el propio equipo
+ip       0.0.0.0/32    «escuchar en todas las interfaces», no es la dirección de nadie
+ip       ::1           bucle local en IPv6
+
+dominio  github.com             alojamiento del repositorio público y de dependencias
+dominio  crates.io              registro de paquetes de Rust (Cargo.lock)
+dominio  static.rust-lang.org   descarga de rustup y de la cadena de herramientas
+dominio  host.containers.internal  este equipo visto desde un contenedor de podman
+dominio  qbittorrent.org        web del cliente que maneja semillero
+dominio  sil.org                texto de la licencia SIL OFL de las fuentes
+
+correo   noreply@anthropic.com  línea Co-Authored-By de los commits hechos con Claude
+
+binario  crates/semillero/public/fuentes/*.woff2   fuentes con licencia OFL que sirve la web
+binario  docs/capturas/*.png                       capturas del README, hechas con el qBittorrent simulado
+dominio  ghcr.io     registro de contenedores donde la CI publica la imagen
+dominio  docker.io   registro de la imagen base de Rust del Containerfile
+dominio  gcr.io      registro de la imagen base distroless del Containerfile

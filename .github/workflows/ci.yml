@@ -1,0 +1,114 @@
+# Comprobaciones de cada push y pull request: formato, clippy, pruebas, la
+# parte del navegador (wasm), que compila en Windows, los guiones de deploy/,
+# tools/ y packaging/, el escáner de datos privados y cargo-deny.
+#
+# Las acciones de terceros van fijadas por commit (con su versión al lado);
+# para subirlas, git ls-remote https://github.com/<dueño>/<acción> refs/tags/<versión>
+# (con ^{} si la etiqueta es anotada).
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust (fmt, clippy, pruebas, wasm)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust de rust-toolchain.toml
+        run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Formato
+        run: cargo fmt --all --check
+      - name: Clippy (servidor)
+        run: cargo clippy --workspace --all-targets --locked --features semillero/ssr -- -D warnings
+      - name: Pruebas
+        run: cargo test --workspace --locked --features semillero/ssr
+      - name: Clippy (navegador, wasm)
+        run: >-
+          cargo clippy -p semillero --lib --locked
+          --target wasm32-unknown-unknown --no-default-features --features hydrate
+          -- -D warnings
+
+  windows:
+    name: Compila en Windows
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust de rust-toolchain.toml
+        shell: bash
+        run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: cargo check del servidor
+        shell: bash
+        run: cargo check -p semillero --bin semillero --locked --no-default-features --features ssr
+
+  guiones:
+    name: Guiones (deploy, tools, packaging)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Herramientas
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends git-filter-repo shellcheck zip unzip
+      - name: deploy/pruebas
+        run: for p in deploy/pruebas/*.sh; do echo "== $p"; sh "$p"; done
+      - name: tools/pruebas
+        run: for p in tools/pruebas/*.sh; do echo "== $p"; sh "$p"; done
+      - name: packaging/pruebas
+        run: for p in packaging/pruebas/*.sh; do echo "== $p"; sh "$p"; done
+      - name: Sintaxis de packaging/
+        run: |
+          for f in packaging/*.sh packaging/pruebas/*.sh packaging/freebsd/semillero; do sh -n "$f"; done
+          shellcheck -x packaging/*.sh packaging/pruebas/*.sh
+          shellcheck -s sh -S warning packaging/freebsd/semillero
+
+  privado:
+    name: Sin datos privados (árbol e historial)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Escáner con las reglas genéricas
+        run: sh tools/publicar/ci.sh
+
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: cargo-deny@0.20.2
+      - name: Licencias, avisos de seguridad y orígenes
+        run: cargo deny check

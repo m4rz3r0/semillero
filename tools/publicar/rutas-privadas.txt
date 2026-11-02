@@ -1,0 +1,12 @@
+# Rutas que nunca salen en el repositorio público, ni en el árbol ni en el
+# historial (regenerar.sh las quita con git filter-repo --invert-paths).
+# Una por línea: «carpeta/» para una carpeta entera, una ruta de fichero, o
+# «glob:patrón» / «regex:expresión» como en git filter-repo --paths-from-file.
+# regenerar.sh añade siempre odd/, docs/superpowers/, .atl/, .superpowers/ y
+# target/.
+odd/
+docs/superpowers/
+.atl/
+.superpowers/
+target/
+deploy/config.local

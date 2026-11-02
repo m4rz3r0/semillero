@@ -1,0 +1,84 @@
+#!/bin/sh
+# Gancho pre-push: antes de subir al repositorio público, pasa el escáner
+# (tools/publicar/escanear.sh) con la lista privada por todo lo que se sube
+# y lo bloquea si encuentra algo. Las subidas a cualquier otro remoto pasan
+# sin mirar nada.
+#
+# Configuración (git config; la pone instalar-gancho.sh):
+#   semillero.publico      dirección (o nombre de remoto) del repositorio
+#                          público; sin ella el gancho no hace nada
+#   semillero.privado      lista privada (por defecto
+#                          ~/.config/semillero-publicacion/privado.txt)
+#   semillero.excepciones  textos que pueden salir aunque lleven un valor
+#                          privado (por defecto el excepciones.txt de esa
+#                          carpeta, si existe)
+#   semillero.escaner      escanear.sh que se usa (si no está, el de la copia
+#                          de trabajo)
+#
+# Git lo llama con el nombre y la dirección del remoto, y por la entrada
+# «ref-local sha-local ref-remota sha-remota» por cada referencia. Se escanea
+# lo que aún no está en el remoto: los commits nuevos, sus ficheros, sus
+# mensajes y autores, y las etiquetas anotadas.
+
+set -eu
+
+remoto=${1:-}
+url=${2:-}
+publico=$(git config --get semillero.publico || true)
+
+normalizar()
+{
+	printf '%s\n' "$1" | sed -e 's#/*$##' -e 's#\.git$##'
+}
+
+if [ -z "$publico" ] ||
+	{ [ "$(normalizar "$url")" != "$(normalizar "$publico")" ] && [ "$remoto" != "$publico" ]; }; then
+	cat >/dev/null
+	exit 0
+fi
+
+revs=
+while read -r _ref_local sha_local _ref_remota sha_remota; do
+	case $sha_local in
+	*[!0]*) ;;
+	*) continue ;; # borrar una referencia no sube nada
+	esac
+	revs="$revs $sha_local"
+	case $sha_remota in
+	*[!0]*)
+		if git cat-file -e "$sha_remota^{commit}" 2>/dev/null; then
+			revs="$revs ^$sha_remota"
+		fi
+		;;
+	esac
+done
+[ -n "$revs" ] || exit 0
+
+escaner=$(git config --get semillero.escaner || true)
+if [ -z "$escaner" ] || [ ! -r "$escaner" ]; then
+	escaner=$(git rev-parse --show-toplevel 2>/dev/null || true)/tools/publicar/escanear.sh
+fi
+if [ ! -r "$escaner" ]; then
+	echo "pre-push: no encuentro escanear.sh; no se sube nada al repositorio público" >&2
+	exit 1
+fi
+CONFIG=$HOME/.config/semillero-publicacion
+privado=$(git config --get semillero.privado || true)
+privado=${privado:-$CONFIG/privado.txt}
+if [ ! -r "$privado" ]; then
+	echo "pre-push: no puedo leer la lista privada $privado; no se sube nada al repositorio público" >&2
+	exit 1
+fi
+excepciones=$(git config --get semillero.excepciones || true)
+if [ -z "$excepciones" ] && [ -f "$CONFIG/excepciones.txt" ]; then
+	excepciones=$CONFIG/excepciones.txt
+fi
+
+set -- --historia --revs "$revs" --privado "$privado"
+[ -z "$excepciones" ] || set -- "$@" --excepciones "$excepciones"
+if sh "$escaner" "$@" .; then
+	exit 0
+fi
+echo "pre-push: BLOQUEADO: lo que se sube al repositorio público tiene hallazgos (arriba)." >&2
+echo "pre-push: regenera la copia con tools/publicar/regenerar.sh en vez de subir esto." >&2
+exit 1

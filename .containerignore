@@ -1,0 +1,11 @@
+# Lo que no entra en el contexto de packaging/container/Containerfile.
+.git
+.github
+target
+**/*.db
+**/*.db-*
+odd
+docs
+.atl
+.superpowers
+deploy/config.local

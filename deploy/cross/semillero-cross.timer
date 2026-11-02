@@ -1,0 +1,14 @@
+# Temporizador de usuario (opcional) de semillero-cross.service: mientras el
+# PC de compilación está encendido, mira cada 15 minutos si hay una etiqueta
+# nueva. No se activa solo: systemctl --user enable --now semillero-cross.timer.
+
+[Unit]
+Description=Mirar cada 15 minutos si hay una versión de semillero que compilar
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=15min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

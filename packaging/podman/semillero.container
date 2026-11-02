@@ -1,0 +1,54 @@
+# semillero con podman y quadlet (podman 4.4 o más nuevo), sin root o como
+# root.
+#
+# Sin root, como tu usuario:
+#   mkdir -p ~/.config/containers/systemd ~/.config/semillero
+#   cp semillero.container ~/.config/containers/systemd/
+#   podman volume create --ignore semillero-datos
+#   podman run --rm -it --user 0 \
+#     -v semillero-datos:/data:Z -v ~/.config/semillero:/config:Z \
+#     ghcr.io/m4rz3r0/semillero:latest \
+#     configurar --env /config/semillero.env --secretos /data
+#   systemctl --user daemon-reload
+#   systemctl --user start semillero
+#   loginctl enable-linger "$USER"     # para que arranque sin sesión abierta
+#
+# Como root: /etc/containers/systemd/semillero.container y
+# /etc/semillero/semillero.env (-v /etc/semillero:/config:Z al configurar),
+# y systemctl sin --user.
+#
+# La web queda en http://127.0.0.1:8090, solo desde este equipo. Los datos
+# (la base de datos) viven en el volumen semillero-datos. Con la red normal
+# del contenedor, semillero entra en qBittorrent en el modo con contraseña
+# (SEMILLERO_QBT_CLAVE en semillero.env; ver docs/instalar/linux-podman.md).
+
+[Unit]
+Description=semillero: cuidar los torrents de qBittorrent
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+ContainerName=semillero
+# Mejor una versión fija (ghcr.io/m4rz3r0/semillero:X.Y.Z) que latest.
+Image=ghcr.io/m4rz3r0/semillero:latest
+# %E es ~/.config sin root y /etc como root.
+EnvironmentFile=%E/semillero/semillero.env
+Volume=semillero-datos:/data:Z
+# Solo desde este equipo. Desde otros, con un proxy inverso con HTTPS en
+# este equipo y SEMILLERO_ORIGEN y SEMILLERO_PROXY en semillero.env.
+PublishPort=127.0.0.1:8090:8090
+# La imagen ya corre sin root (uid 65532); además, nada de privilegios.
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=ALL
+# Un init como PID 1: reenvía SIGTERM y podman para el servicio al momento.
+RunInit=true
+# Con «podman auto-update» se actualiza cuando cambia la etiqueta.
+#AutoUpdate=registry
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target

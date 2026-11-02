@@ -1,0 +1,47 @@
+# cargo deny check: licencias compatibles con MIT, sin avisos de seguridad
+# y solo dependencias de crates.io.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = [
+    # Sin mantenimiento (no es un fallo de seguridad); llega solo a través
+    # de leptos (tachys, either_of), que aún no lo ha sustituido.
+    { id = "RUSTSEC-2024-0436", reason = "paste: macro sin mantenimiento que usa leptos" },
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+# La lista es de licencias aceptables, no de las que hay ahora.
+unused-allowed-license = "allow"
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "Unlicense",
+    "CC0-1.0",
+    "BSL-1.0",
+    "CDLA-Permissive-2.0",
+]
+private = { ignore = true }
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

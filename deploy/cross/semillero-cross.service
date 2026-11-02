@@ -1,0 +1,21 @@
+# Unidad de usuario de systemd (opcional) del PC de compilación: compila la
+# última etiqueta vX.Y.Z de semillero para FreeBSD y la entrega al buzón del
+# servidor si aún no se ha hecho. La lanza semillero-cross.timer. No se
+# instala ni se activa sola: ver deploy/README.md.
+#
+# Necesita ~/.config/semillero-cross.env con
+#   SEMILLERO_REPO_URL=<URL de git del repositorio>
+#   SEMILLERO_BUZON_SSH=smentrega@<servidor>
+# y los guiones en ~/semillero-cross/bin (los copia deploy/cross/lanzar.sh).
+
+[Unit]
+Description=Compilar semillero para FreeBSD en el PC de compilación
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/semillero-cross.env
+ExecStart=/usr/bin/bash %h/semillero-cross/bin/cross/compilar-freebsd.sh --ultima --repo ${SEMILLERO_REPO_URL} --entregar ${SEMILLERO_BUZON_SSH}
+Nice=10
+TimeoutStartSec=90min

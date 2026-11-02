@@ -1,0 +1,105 @@
+[package]
+name = "semillero"
+version = "0.3.0"
+description = "Web (Leptos + Axum) para cuidar los torrents de qBittorrent sin arriesgar un H&R"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+autotests = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints.rust]
+# cargo-leptos compila en depuración con `--cfg erase_components`.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(erase_components)"] }
+
+[dependencies]
+leptos.workspace = true
+leptos_meta.workspace = true
+leptos_router.workspace = true
+serde.workspace = true
+# Tipos `Stream` y `Sink` del cliente de las server functions (`cliente.rs`).
+futures = { version = "0.3", default-features = false, features = ["std"] }
+# Tipos de reglas y avisos (servidor y navegador).
+reglas = { path = "../reglas" }
+# Servidor (feature `ssr`).
+leptos_axum = { workspace = true, optional = true }
+axum = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["fs", "signal"] }
+sqlx = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+qbt = { path = "../qbt", optional = true }
+jellyfin = { path = "../jellyfin", optional = true }
+sha2 = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
+getrandom = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, optional = true }
+# Contraseñas sin eco en `semillero configurar`.
+rpassword = { version = "7.5", optional = true }
+# Navegador (feature `hydrate`).
+wasm-bindgen = { workspace = true, optional = true }
+console_error_panic_hook = { workspace = true, optional = true }
+# Cookie del tema (`document.cookie`) y el archivo de un preset al subirlo.
+web-sys = { version = "0.3", optional = true, features = [
+    "HtmlDocument",
+    "HtmlInputElement",
+    "FileList",
+    "File",
+    "Blob",
+] }
+# Leer el archivo de un preset en el navegador (`Blob::text`).
+wasm-bindgen-futures = { version = "0.4", optional = true }
+
+# Espacio en disco: `statvfs` en Unix, `GetDiskFreeSpaceExW` en Windows.
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", optional = true, features = ["Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+qbt-sim = { path = "../qbt-sim" }
+tempfile.workspace = true
+tower = { workspace = true, features = ["util"] }
+tokio.workspace = true
+serde_json.workspace = true
+# Cuerpo por trozos (sin longitud) en la prueba del límite de tamaño.
+futures-util = { version = "0.3", default-features = false }
+
+[features]
+hydrate = [
+    "leptos/hydrate",
+    "dep:wasm-bindgen",
+    "dep:console_error_panic_hook",
+    "dep:web-sys",
+    "dep:wasm-bindgen-futures",
+]
+ssr = [
+    "dep:leptos_axum",
+    "dep:axum",
+    "dep:tokio",
+    "dep:sqlx",
+    "dep:serde_json",
+    "dep:qbt",
+    "dep:jellyfin",
+    "dep:sha2",
+    "dep:base64",
+    "dep:getrandom",
+    "dep:tracing",
+    "dep:tracing-subscriber",
+    "dep:rpassword",
+    "dep:libc",
+    "dep:windows-sys",
+    "leptos/ssr",
+    "leptos_meta/ssr",
+    "leptos_router/ssr",
+]
+
+# Un solo binario de integración, con un módulo por área.
+[[test]]
+name = "integracion"
+path = "tests/integracion/main.rs"
+required-features = ["ssr"]

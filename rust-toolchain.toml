@@ -1,0 +1,8 @@
+# Versión fija, la misma que la imagen de packaging/container/Containerfile
+# (RUST_IMAGE): CI, el contenedor y las compilaciones locales usan el mismo
+# compilador, y una Rust nueva no rompe clippy -D warnings por sorpresa. Al
+# subirla, cambiar las dos.
+[toolchain]
+channel = "1.99.0"
+targets = ["wasm32-unknown-unknown"]
+components = ["rustfmt", "clippy"]

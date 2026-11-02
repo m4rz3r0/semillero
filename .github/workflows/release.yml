@@ -1,0 +1,279 @@
+# Publica una versión al subir una etiqueta vX.Y.Z (la misma versión que
+# crates/semillero/Cargo.toml):
+#
+# - paquetes para Linux x86_64 y aarch64, Windows x86_64 y FreeBSD x86_64
+#   (packaging/empaquetar.sh), con SHA256SUMS;
+# - la imagen de contenedor en ghcr.io (packaging/container/Containerfile);
+# - atestaciones de procedencia (SLSA, firmadas con Sigstore) de cada paquete
+#   y de la imagen: se comprueban con «gh attestation verify», sin claves;
+# - la versión en GitHub con todo lo anterior.
+#
+# Cómo se compila: la web (wasm, JS y CSS) no depende del sistema; la hace
+# cargo-leptos una vez, junto con el binario de Linux x86_64. Los demás
+# binarios salen de cargo con las mismas features (ssr, sin las de por
+# defecto) y LEPTOS_OUTPUT_NAME, lo único que cargo-leptos deja fijado al
+# compilar. Los de Linux se compilan en la imagen de Rust de Debian 12
+# (glibc 2.36), para que corran también en sistemas no tan nuevos. FreeBSD
+# se compila con cross, como en deploy/cross/: un contenedor con el
+# enlazador y la libc de FreeBSD, sin arrancar una máquina virtual (más
+# rápido y con menos piezas que fallen que una VM de FreeBSD en la CI).
+#
+# Sin cachés: lo que se publica se compila desde cero.
+
+name: release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  # La misma que deploy/ (CARGO_LEPTOS_VERSION) y packaging/container/.
+  CARGO_LEPTOS_VERSION: 0.3.11
+  LEPTOS_OUTPUT_NAME: semillero
+
+jobs:
+  version:
+    name: Etiqueta y Cargo.toml
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: v
+        env:
+          ETIQUETA: ${{ github.ref_name }}
+        run: |
+          v=${ETIQUETA#v}
+          cargo_v=$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/semillero/Cargo.toml | head -n 1)
+          if [ "$v" != "$cargo_v" ]; then
+            echo "::error::la etiqueta $ETIQUETA no coincide con la versión de crates/semillero/Cargo.toml ($cargo_v)"
+            exit 1
+          fi
+          echo "version=$v" >>"$GITHUB_OUTPUT"
+
+  linux:
+    name: Linux ${{ matrix.objetivo }}
+    needs: version
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    container:
+      image: docker.io/library/rust:1.99.0-slim-bookworm@sha256:2c3a22f0a5533ea2dd5a16627bc841228151faa2d4de2644ac9987e4a2f1f2fa
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - objetivo: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+            web: true
+          - objetivo: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            web: false
+    steps:
+      - name: git para el checkout
+        run: |
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends git ca-certificates
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust de rust-toolchain.toml
+        run: rustup toolchain install && rustup show active-toolchain
+      - name: Web y binario (cargo-leptos)
+        if: matrix.web
+        run: |
+          cargo install --locked cargo-leptos --version "$CARGO_LEPTOS_VERSION"
+          cargo leptos build --release --precompress
+          test -f target/site/hash.txt
+          mkdir -p salida
+          cp target/release/semillero salida/semillero
+          cp -R target/site salida/site
+      - name: Binario (cargo)
+        if: ${{ !matrix.web }}
+        run: |
+          cargo build --release --locked -p semillero --bin semillero --no-default-features --features ssr
+          mkdir -p salida
+          cp target/release/semillero salida/semillero
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: compilado-${{ matrix.objetivo }}
+          path: salida/
+          if-no-files-found: error
+          retention-days: 3
+
+  windows:
+    name: Windows x86_64-pc-windows-msvc
+    needs: version
+    runs-on: windows-2025
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Sin depender de que el equipo tenga el runtime de Visual C++.
+      RUSTFLAGS: -C target-feature=+crt-static
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust de rust-toolchain.toml
+        run: rustup toolchain install && rustup show active-toolchain
+      - name: Binario (cargo)
+        run: |
+          cargo build --release --locked -p semillero --bin semillero --no-default-features --features ssr
+          mkdir -p salida
+          cp target/release/semillero.exe salida/semillero.exe
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: compilado-x86_64-pc-windows-msvc
+          path: salida/
+          if-no-files-found: error
+          retention-days: 3
+
+  freebsd:
+    name: FreeBSD x86_64-unknown-freebsd
+    needs: version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      # cross solo pasa al contenedor las variables que se le dicen.
+      CROSS_BUILD_ENV_PASSTHROUGH: LEPTOS_OUTPUT_NAME
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust de rust-toolchain.toml
+        run: |
+          rustup toolchain install
+          rustup target add x86_64-unknown-freebsd
+      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: cross@0.2.5
+      - name: Binario (cross)
+        run: |
+          cross build --release --locked --target x86_64-unknown-freebsd \
+            -p semillero --bin semillero --no-default-features --features ssr
+          b=target/x86_64-unknown-freebsd/release/semillero
+          file -b "$b" | grep -q 'FreeBSD' || { file "$b"; exit 1; }
+          mkdir -p salida
+          cp "$b" salida/semillero
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: compilado-x86_64-unknown-freebsd
+          path: salida/
+          if-no-files-found: error
+          retention-days: 3
+
+  imagen:
+    name: Imagen de contenedor
+    needs: version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Construir
+        run: |
+          imagen=ghcr.io/$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGEN=$imagen" >>"$GITHUB_ENV"
+          podman build -f packaging/container/Containerfile \
+            --label "org.opencontainers.image.version=$VERSION" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            -t "$imagen:$VERSION" .
+      - name: Subir
+        id: subir
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GH_TOKEN" | podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          podman push --digestfile digest "$IMAGEN:$VERSION"
+          menor=${VERSION%.*}
+          for t in "$menor" latest; do
+            podman tag "$IMAGEN:$VERSION" "$IMAGEN:$t"
+            podman push "$IMAGEN:$t"
+          done
+          podman logout ghcr.io
+          echo "digest=$(cat digest)" >>"$GITHUB_OUTPUT"
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGEN }}
+          subject-digest: ${{ steps.subir.outputs.digest }}
+          push-to-registry: false
+
+  publicar:
+    name: Paquetes, SHA256SUMS y versión
+    needs: [version, linux, windows, freebsd, imagen]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      ETIQUETA: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: compilado-*
+          path: compilado
+      - name: Empaquetar
+        run: |
+          export COMMIT=$GITHUB_SHA
+          web=compilado/compilado-x86_64-unknown-linux-gnu/site
+          for o in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-unknown-freebsd; do
+            sh packaging/empaquetar.sh "$o" "$VERSION" "compilado/compilado-$o/semillero" "$web" dist
+          done
+          sh packaging/empaquetar.sh x86_64-pc-windows-msvc "$VERSION" \
+            compilado/compilado-x86_64-pc-windows-msvc/semillero.exe "$web" dist
+          (cd dist && LC_ALL=C sha256sum -- semillero-* >SHA256SUMS && cat SHA256SUMS)
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
+      - name: Versión en GitHub
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          imagen=ghcr.io/$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          cat >notas.md <<EOF
+          Paquetes para Linux (x86_64, aarch64), Windows (x86_64) y FreeBSD (x86_64), y la imagen \`$imagen:$VERSION\`.
+
+          Comprueba lo que descargas:
+
+          \`\`\`sh
+          sha256sum -c SHA256SUMS --ignore-missing
+          gh attestation verify semillero-$VERSION-x86_64-unknown-linux-gnu.tar.gz --repo $GITHUB_REPOSITORY
+          gh attestation verify oci://$imagen:$VERSION --repo $GITHUB_REPOSITORY
+          \`\`\`
+          EOF
+          gh release create "$ETIQUETA" --verify-tag --title "semillero $VERSION" \
+            --notes-file notas.md dist/*

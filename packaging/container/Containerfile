@@ -1,0 +1,53 @@
+# Imagen de semillero. Desde la raíz del repositorio:
+#
+#   podman build -f packaging/container/Containerfile -t semillero .
+#   podman run --rm --init -p 127.0.0.1:8090:8090 -v semillero-datos:/data semillero
+#
+# Compila con la misma Rust que rust-toolchain.toml y el mismo cargo-leptos
+# que deploy/ (CARGO_LEPTOS_VERSION); al subir una, cambia también esta. Las
+# imágenes base van fijadas por digest (el índice multiarquitectura).
+#
+# La imagen final no trae shell ni gestor de paquetes: el binario, la web y
+# la libc. Corre como el usuario 65532 y guarda la base de datos en /data.
+
+ARG RUST_IMAGE=docker.io/library/rust:1.99.0-slim-trixie@sha256:2752b332db73fdbb7dc576f06c82ed1f312005784ef913d7e04a28f5f55dc581
+ARG RUNTIME_IMAGE=gcr.io/distroless/cc-debian13:nonroot@sha256:3ee00291cf386ec52a552e6a858d555debd74776eb4bfa53fa3df2cd6677515e
+
+FROM ${RUST_IMAGE} AS herramientas
+ARG CARGO_LEPTOS_VERSION=0.3.11
+RUN --mount=type=cache,id=semillero-cargo-registry,target=/usr/local/cargo/registry \
+	cargo install --locked cargo-leptos --version "${CARGO_LEPTOS_VERSION}"
+
+FROM herramientas AS compilacion
+WORKDIR /src
+# rust-toolchain.toml primero: rustup añade el objetivo wasm32 una vez y la
+# capa se reutiliza mientras no cambie.
+COPY rust-toolchain.toml ./
+RUN rustup toolchain install && rustup show active-toolchain
+COPY . .
+# target/ en una caché de la compilación: lo que hace falta sale a /salida
+# en el mismo paso.
+RUN --mount=type=cache,id=semillero-cargo-registry,target=/usr/local/cargo/registry \
+	--mount=type=cache,id=semillero-target,target=/src/target \
+	cargo leptos build --release --precompress \
+	&& mkdir -p /salida/data \
+	&& cp target/release/semillero /salida/semillero \
+	&& cp -R target/site /salida/site \
+	&& find /salida/site -name '.gitkeep*' -exec rm -f {} + \
+	&& test -f /salida/site/hash.txt
+
+FROM ${RUNTIME_IMAGE}
+LABEL org.opencontainers.image.title="semillero" \
+	org.opencontainers.image.description="Web para cuidar los torrents de qBittorrent" \
+	org.opencontainers.image.licenses="MIT"
+COPY --from=compilacion /salida/semillero /app/semillero
+COPY --from=compilacion /salida/site /app/site
+COPY --from=compilacion --chown=65532:65532 /salida/data /data
+ENV SEMILLERO_LISTEN=0.0.0.0:8090 \
+	SEMILLERO_DB=/data/semillero.db \
+	LEPTOS_SITE_ROOT=/app/site
+USER 65532:65532
+WORKDIR /data
+VOLUME ["/data"]
+EXPOSE 8090
+ENTRYPOINT ["/app/semillero"]
