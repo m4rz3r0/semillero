@@ -7,7 +7,10 @@ propia. Para dejarlo como servicio, mira la guía de tu sistema en el
 
 Antes: [Preparar qBittorrent](qbittorrent.md).
 
-Cambia `X.Y.Z` por la versión.
+Cambia `X.Y.Z` por la versión. Las órdenes son para `sh`, `bash` o `zsh`;
+en fish, escribe `set V X.Y.Z` en lugar de `V=X.Y.Z` (y lo mismo con `P`).
+Arrancar semillero es igual en cualquier shell, también en PowerShell:
+`semillero --env semillero.env` lee él mismo la configuración.
 
 ## Con un paquete de la versión
 
@@ -55,8 +58,7 @@ gh attestation verify "$P.tar.gz" --repo m4rz3r0/semillero
 tar -xzf "$P.tar.gz"
 cd "$P"
 ./semillero configurar
-set -a; . ./semillero.env; set +a
-./semillero
+./semillero --env semillero.env
 ```
 
 `semillero configurar` pregunta las direcciones (la de qBittorrent y cómo
@@ -76,7 +78,10 @@ con el usuario y la contraseña de qBittorrent. Para pararlo, `Ctrl+C`.
 Vuelve a ejecutar `./semillero configurar`: propone lo que ya hay y solo
 cambia lo que cambies. También puedes editar `semillero.env` a mano (una
 variable por línea, `VARIABLE=valor`, sin comillas); las variables están
-en la [tabla del README](../../README.md#configuración).
+en la [tabla del README](../../README.md#configuración). Si una variable ya
+está puesta en el entorno, manda sobre la del fichero. Si prefieres cargar
+el fichero tú, en `sh` vale `set -a; . ./semillero.env; set +a` antes de
+`./semillero`.
 
 ## Compilado desde el código
 
@@ -90,8 +95,8 @@ git checkout vX.Y.Z
 cargo install --locked cargo-leptos --version 0.3.11
 cargo leptos build --release --precompress
 ./target/release/semillero configurar
-set -a; . ./semillero.env; set +a
-LEPTOS_SITE_ROOT=target/site ./target/release/semillero
+echo LEPTOS_SITE_ROOT=target/site >> semillero.env
+./target/release/semillero --env semillero.env
 ```
 
 Lo que hace falta para llevarlo a otra carpeta: `target/release/semillero`

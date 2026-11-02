@@ -14,6 +14,11 @@
 # de cargo-leptos), COMMIT (el commit completo de la etiqueta) y LICENSE si
 # la hay; y SHA256SUMS, una línea «<sha256>  <archivo>» como la escribe
 # sha256sum. SHA256SUMS llega el último: con él, la versión está completa.
+#
+# Si se configura un repositorio de GitHub (GITHUB_REPO del actualizador),
+# la misma versión se puede traer de su release vX.Y.Z (preparar_github):
+# el paquete, SHA256SUMS (una línea por paquete publicado) y la atestación
+# de origen, que comprueba «gh attestation verify».
 
 PRECOMPILADA_OBJETIVO=x86_64-unknown-freebsd
 
@@ -202,7 +207,6 @@ preparar_precompilada()
 	_commit=$3
 	_dst=$4
 	_arch=$(archivo_precompilada "$_ver")
-	_raiz=${_arch%.tar.gz}
 	if ! version_valida "$_ver"; then
 		echo "versión no válida" >&2
 		return 1
@@ -227,6 +231,27 @@ preparar_precompilada()
 			return 1
 		fi
 	done
+	comprobar_paquete "$_trabajo" "$_ver" "$_commit" "$_dst"
+}
+
+# Comprueba el paquete de la versión $2 que está, con su SHA256SUMS, en la
+# carpeta de trabajo $1 (propia, de quien comprueba), y lo deja desempaquetado
+# en $4 (que no debe existir) con semillero, site/ y COMMIT y nada más. $3 es
+# el commit que tiene que traer COMMIT; vacío solo con $5 = github: entonces
+# vale cualquier commit (el del repositorio público es otro: lo que ata el
+# paquete a la etiqueta es la atestación, ya comprobada) y además la web
+# tiene que estar completa (web_completa). Lo demás que traiga la carpeta
+# (LICENSE, README.md, rc.d/…) no se instala. Borra $1 siempre; si algo no
+# cuadra, escribe el motivo en la salida de error, sale con 1 y no crea $4.
+comprobar_paquete()
+{
+	_trabajo=$1
+	_ver=$2
+	_commit=$3
+	_dst=$4
+	_origen=${5:-}
+	_arch=$(archivo_precompilada "$_ver")
+	_raiz=${_arch%.tar.gz}
 	# SHA256SUMS: exactamente una línea, la del paquete, con 64 cifras
 	# hexadecimales en minúscula.
 	_re=$(printf '%s' "$_arch" | sed 's/\./\\./g')
@@ -272,7 +297,9 @@ preparar_precompilada()
 		rm -rf "$_trabajo"
 		return 1
 	fi
-	if [ "$(head -n 1 "$_d/COMMIT")" != "$_commit" ]; then
+	if [ "$_origen" = github ] && [ -z "$_commit" ]; then
+		:
+	elif [ "$(head -n 1 "$_d/COMMIT")" != "$_commit" ]; then
 		echo "el paquete es de otro commit ($(head -n 1 "$_d/COMMIT" | tr -cd '0-9a-f' | cut -c1-12)), no del de v$_ver" >&2
 		rm -rf "$_trabajo"
 		return 1
@@ -282,10 +309,147 @@ preparar_precompilada()
 		rm -rf "$_trabajo"
 		return 1
 	fi
+	if [ "$_origen" = github ] && ! web_completa "$_d/site"; then
+		rm -rf "$_trabajo"
+		return 1
+	fi
 	if ! mkdir "$_dst" || ! mv "$_d/semillero" "$_d/site" "$_d/COMMIT" "$_dst/"; then
 		echo "no se puede preparar $_dst" >&2
 		rm -rf "$_trabajo" "$_dst"
 		return 1
 	fi
 	rm -rf "$_trabajo"
+}
+
+# ¿Es $1 un repositorio de GitHub «propietario/nombre»? El propietario, de
+# letras, cifras y «-» (39 como mucho); el nombre, también con «.» y «_»
+# (100 como mucho); ninguno empieza por «-» ni el nombre es «.» o «..».
+repo_github_valido()
+{
+	case $1 in
+	*/*/* | -* | */-* | */ | /* | */. | */.. | *[!A-Za-z0-9._/-]*) return 1 ;;
+	*/*) ;;
+	*) return 1 ;;
+	esac
+	_propietario=${1%%/*}
+	_nombre=${1#*/}
+	case $_propietario in
+	*[!A-Za-z0-9-]*) return 1 ;;
+	esac
+	[ "${#_propietario}" -le 39 ] && [ "${#_nombre}" -le 100 ]
+}
+
+# Descarga $1 (https) en $2 con fetch: como mucho $3 bytes y 15 minutos
+# (60 s sin datos). Sale con 1 si fetch falla o si trae más de $3 bytes.
+descargar_https()
+{
+	_salida=$2
+	{
+		timeout 900 fetch -q -T 60 -o - "$1" 2>/dev/null
+		echo $? >"$_salida.rc"
+	} | head -c "$(($3 + 1))" >"$_salida"
+	_rc=$(cat "$_salida.rc" 2>/dev/null)
+	rm -f "$_salida.rc"
+	[ "$_rc" = 0 ] && [ "$(wc -c <"$_salida" | tr -d ' ')" -le "$3" ]
+}
+
+# Trae de la release v$2 del repositorio de GitHub $1 la versión $2 para
+# FreeBSD y la deja desempaquetada en $3 (que no debe existir), como
+# preparar_precompilada. Pasos, en una carpeta de trabajo propia:
+# 1. Descarga el paquete y SHA256SUMS de
+#    https://github.com/$1/releases/download/v$2/ y comprueba el sha256 con
+#    la línea del paquete (SHA256SUMS trae una por paquete publicado).
+# 2. Trae, sin token, las atestaciones de ese sha256 de
+#    https://api.github.com/repos/$1/attestations/sha256:<sha256> y saca con
+#    jq cada «bundle» a una línea (JSON lines, lo que acepta gh --bundle).
+# 3. gh attestation verify --bundle (sin conexión a la API de GitHub, que sin
+#    sesión gh no usa): la atestación tiene que ser de $1, de la etiqueta
+#    refs/tags/v$2 y firmada por .github/workflows/release.yml.
+# 4. comprobar_paquete con origen github: todo lo de las precompiladas salvo
+#    que COMMIT sea el de la etiqueta privada; además, la web completa.
+# Nada de lo descargado se ejecuta: jq y gh solo lo leen. Sale con 0 si
+# queda en $3; 1 si no se puede usar (aún no publicada, sin red, sin
+# atestación, falta gh o jq); 2 si se rechaza (sumas, atestación o paquete
+# que no cuadran). En los dos casos dice el motivo en la salida de error y
+# no deja $3. GITHUB_MAX_PAQUETE: bytes como mucho del paquete.
+preparar_github()
+{
+	_grepo=$1
+	_gver=$2
+	_gdst=$3
+	_gmax=${GITHUB_MAX_PAQUETE:-268435456}
+	case $_gmax in
+	'' | *[!0-9]*) _gmax=268435456 ;;
+	esac
+	if ! repo_github_valido "$_grepo"; then
+		echo "repositorio de GitHub no válido" >&2
+		return 2
+	fi
+	if ! version_valida "$_gver"; then
+		echo "versión no válida" >&2
+		return 2
+	fi
+	for _go in gh jq fetch; do
+		if ! command -v "$_go" >/dev/null 2>&1; then
+			echo "falta $_go (pkg install gh jq)" >&2
+			return 1
+		fi
+	done
+	_garch=$(archivo_precompilada "$_gver")
+	_gurl=https://github.com/$_grepo/releases/download/v$_gver
+	_gtrabajo=$(mktemp -d) || return 1
+	if ! descargar_https "$_gurl/$_garch" "$_gtrabajo/$_garch" "$_gmax" ||
+		! descargar_https "$_gurl/SHA256SUMS" "$_gtrabajo/SHA256SUMS.github" 65536; then
+		echo "no se puede descargar $_garch o SHA256SUMS de la release v$_gver de github.com/$_grepo (¿aún no está publicada?)" >&2
+		rm -rf "$_gtrabajo"
+		return 1
+	fi
+	_gre=$(printf '%s' "$_garch" | sed 's/\./\\./g')
+	_gesperada=$(sed -n "s/^\([0-9a-f]\{64\}\)  $_gre\$/\1/p" "$_gtrabajo/SHA256SUMS.github")
+	if [ "${#_gesperada}" -ne 64 ]; then
+		echo "SHA256SUMS de GitHub no tiene una sola línea «<sha256>  $_garch»" >&2
+		rm -rf "$_gtrabajo"
+		return 2
+	fi
+	_gsuma=$(suma_sha256 "$_gtrabajo/$_garch")
+	if [ "$_gsuma" != "$_gesperada" ]; then
+		echo "el sha256 de $_garch no coincide con SHA256SUMS de GitHub" >&2
+		rm -rf "$_gtrabajo"
+		return 2
+	fi
+	if ! descargar_https "https://api.github.com/repos/$_grepo/attestations/sha256:$_gsuma" \
+		"$_gtrabajo/atestaciones.json" 16777216; then
+		echo "no se pueden traer las atestaciones de $_garch de api.github.com (¿no tiene?)" >&2
+		rm -rf "$_gtrabajo"
+		return 1
+	fi
+	if ! jq -c '.attestations | arrays | .[] | objects | .bundle | objects' \
+		<"$_gtrabajo/atestaciones.json" >"$_gtrabajo/atestaciones.jsonl" 2>/dev/null ||
+		[ ! -s "$_gtrabajo/atestaciones.jsonl" ]; then
+		echo "api.github.com no da ninguna atestación de $_garch" >&2
+		rm -rf "$_gtrabajo"
+		return 1
+	fi
+	# gh con una casa vacía: ni sesión, ni configuración, ni avisos.
+	if ! mkdir "$_gtrabajo/casa" "$_gtrabajo/paquete"; then
+		rm -rf "$_gtrabajo"
+		return 1
+	fi
+	if ! HOME=$_gtrabajo/casa GH_CONFIG_DIR=$_gtrabajo/casa/gh XDG_CACHE_HOME=$_gtrabajo/casa/cache \
+		GH_TOKEN='' GITHUB_TOKEN='' GH_NO_UPDATE_NOTIFIER=1 GH_PROMPT_DISABLED=1 NO_COLOR=1 \
+		timeout 300 gh attestation verify "$_gtrabajo/$_garch" --bundle "$_gtrabajo/atestaciones.jsonl" \
+		--repo "$_grepo" --source-ref "refs/tags/v$_gver" \
+		--signer-workflow "$_grepo/.github/workflows/release.yml" >"$_gtrabajo/gh.txt" 2>&1; then
+		echo "la atestación de $_garch no es de $_grepo, refs/tags/v$_gver y release.yml ($(grep -v '^[[:space:]]*$' "$_gtrabajo/gh.txt" | tail -n 1 | tr -cd '[:alnum:][:space:].,:;()/_-' | cut -c1-160))" >&2
+		rm -rf "$_gtrabajo"
+		return 2
+	fi
+	# El paquete, con su línea de SHA256SUMS, a una carpeta solo suya.
+	if ! mv "$_gtrabajo/$_garch" "$_gtrabajo/paquete/$_garch" ||
+		! printf '%s  %s\n' "$_gesperada" "$_garch" >"$_gtrabajo/paquete/SHA256SUMS" ||
+		! comprobar_paquete "$_gtrabajo/paquete" "$_gver" "" "$_gdst" github; then
+		rm -rf "$_gtrabajo"
+		return 2
+	fi
+	rm -rf "$_gtrabajo"
 }

@@ -96,13 +96,10 @@ pub(super) async fn portada() -> Result<DatosPortada, ServerFnError> {
     let state = app_state()?;
     let ahora = ahora_unix();
     let red = crate::estado_red::leer(state.cfg.estado_red.as_deref(), ahora as f64);
-    let lista = match state.qbt.torrents().await {
-        Ok(l) => Some(l),
-        Err(e) => {
-            tracing::warn!("portada sin torrents: {e}");
-            None
-        }
-    };
+    let lista = state.qbt.torrents().await.map_err(|e| {
+        tracing::warn!("portada sin torrents: {e}");
+        e
+    });
     match armar_portada(&state, ahora, red, lista).await {
         Ok(p) => Ok(p),
         Err(e) => interno(e),
@@ -113,10 +110,11 @@ async fn armar_portada(
     state: &AppState,
     ahora: i64,
     red: crate::estado_red::EstadoRed,
-    lista: Option<Vec<qbt::TorrentQbt>>,
+    lista: Result<Vec<qbt::TorrentQbt>, qbt::Error>,
 ) -> Result<DatosPortada, sqlx::Error> {
     let db = &state.db;
-    let qbt_ok = lista.is_some();
+    let qbt_ok = lista.is_ok();
+    let qbt_clave_mala = matches!(lista, Err(qbt::Error::CuentaRechazada));
     let lista = lista.unwrap_or_default();
     let normas = db::normas(db).await?;
     let reglas_cat = db::reglas(db).await?;
@@ -202,6 +200,7 @@ async fn armar_portada(
             vpn: red.vpn,
             puerto: red.puerto.is_some(),
             qbt: qbt_ok,
+            qbt_clave_mala,
             discos,
         },
         modo_real: db::modo(db).await? == Modo::BorradoReal,

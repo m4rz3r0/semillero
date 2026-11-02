@@ -136,6 +136,10 @@ pub struct Franja {
     pub vpn: bool,
     pub puerto: bool,
     pub qbt: bool,
+    /// qBittorrent no acepta la contraseña con la que entra semillero (modo
+    /// con contraseña); con `qbt` a `false`.
+    #[serde(default)]
+    pub qbt_clave_mala: bool,
     pub discos: Vec<FichaDisco>,
 }
 

@@ -173,8 +173,9 @@ Para volver atrás, apunta `current` a la versión anterior y reinicia.
 ## Actualizar solo, con el actualizador
 
 `deploy/freebsd/` instala en el host un cron que cada 15 minutos busca la
-última etiqueta `vX.Y.Z`, la compila en una jail de compilación sin
-privilegios, para el servicio, copia la base de datos, cambia `current` y
+última etiqueta `vX.Y.Z`, toma el paquete de FreeBSD de su release de
+GitHub (comprobando `SHA256SUMS` y la atestación, como arriba) o la compila
+en una jail de compilación sin privilegios, para el servicio, copia la base de datos, cambia `current` y
 arranca. Si `/salud` no responde con la versión nueva en 60 s, vuelve a la
 anterior. Usa la misma jail, el mismo usuario y el mismo rc.d de esta guía.
 
@@ -210,13 +211,20 @@ En resumen:
    DNS_IP=192.0.2.1
    RED_LAN='{ 192.0.2.0/24 }'
    INTERFAZ_EXT=em0
-   PRECOMPILADAS_ESPERA=
+   GITHUB_REPO=m4rz3r0/semillero
+   PRECOMPILADAS_ESPERA=30
    ```
 
    `REPO_IP` se queda vacía: solo sirve para dejar pasar a la jail de
    compilación a un servidor git de tu red, y con el repositorio en
-   Internet no hace falta. `PRECOMPILADAS_ESPERA` vacía: sin PC de compilación,
-   compila en cuanto ve la etiqueta.
+   Internet no hace falta. `GITHUB_REPO`: instala el paquete de la release
+   de GitHub si su atestación es de esa etiqueta y de `release.yml`; necesita
+   `pkg install gh jq` en el host (sin sesión de `gh`). Sin PC de
+   compilación, `PRECOMPILADAS_ESPERA=30` es lo que espera a la release (que
+   sale unos minutos después de la etiqueta) antes de compilar aquí; con
+   `GITHUB_REPO` vacía, déjala vacía también y compila en cuanto ve la
+   etiqueta. Más en
+   [Versiones de GitHub](../../deploy/README.md#versiones-de-github-opcional).
 4. Repite `install.sh` y sigue lo que escribe: la jail de compilación, las
    reglas de pf y el montaje en solo lectura (pasos 2, 3 y 5 de
    [Preparar el host](../../deploy/README.md#preparar-el-host-una-vez)).

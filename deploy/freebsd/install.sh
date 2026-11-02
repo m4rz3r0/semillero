@@ -32,7 +32,9 @@
 # final, ya rellenado con la configuración.
 #
 # Si la configuración no existe, escribe la plantilla y para; si le falta un
-# valor obligatorio, dice cuál y para, antes de instalar nada más.
+# valor obligatorio, dice cuál y para, antes de instalar nada más. Lo mismo
+# si GITHUB_REPO no es propietario/repositorio o, con GITHUB_REPO, faltan gh
+# o jq en el host (dice qué pkg install falta; no instala paquetes del host).
 #
 # --prefijo DIR (o SEMILLERO_ACT_RAIZ): lo instala todo bajo DIR, sin pedir
 # root, sin cambiar dueños y sin tocar ninguna jail; es para las pruebas
@@ -91,6 +93,7 @@ USUARIO_COMPILAR=smbuild
 UID_COMPILAR=3170
 USUARIO_BUZON=smentrega
 UID_BUZON=3171
+GITHUB_REPO=
 
 say()
 {
@@ -165,6 +168,14 @@ else
 		# cargo (uno por núcleo); menos trabajos, menos memoria.
 		TRABAJOS_COMPILACION=
 
+		# Repositorio de GitHub (propietario/repositorio, p. ej.
+		# propietario/semillero) que publica las versiones con su atestación de
+		# origen. Si se pone, una versión nueva que no está en el buzón se trae
+		# de su release, comprobando SHA256SUMS y la atestación con gh, antes de
+		# compilarla aquí. Necesita gh y jq en el host: pkg install gh jq.
+		# Vacía: no se mira GitHub.
+		GITHUB_REPO=
+
 		# Solo para las reglas de pf que escribe install.sh: el servidor git de
 		# la red local (REPO_PUERTO vacío: 22; REPO_IP vacía si el repositorio
 		# está en Internet, que la jail ya alcanza) y el DNS a los que llega la
@@ -201,6 +212,23 @@ done
 if [ -n "$_faltan" ]; then
 	echo "ERROR: faltan en $CONF:$_faltan; rellénalas y repite install.sh (no se ha instalado nada más)" >&2
 	exit 1
+fi
+if [ -n "$GITHUB_REPO" ]; then
+	# shellcheck source=../lib/precompiladas.sh
+	. "$DEPLOY_DIR/lib/precompiladas.sh"
+	if ! repo_github_valido "$GITHUB_REPO"; then
+		echo "ERROR: GITHUB_REPO tiene que ser propietario/repositorio de GitHub (p. ej. propietario/semillero) o vacía; corrígela en $CONF y repite install.sh (no se ha instalado nada más)" >&2
+		exit 1
+	fi
+	# gh y jq son paquetes del host: no se instalan desde aquí.
+	_paquetes=
+	for _o in gh jq; do
+		[ -x "$P/usr/local/bin/$_o" ] || _paquetes="$_paquetes $_o"
+	done
+	if [ -n "$_paquetes" ]; then
+		echo "ERROR: con GITHUB_REPO el actualizador necesita en el host: pkg install$_paquetes; instálalo y repite install.sh (no se ha instalado nada más)" >&2
+		exit 1
+	fi
 fi
 
 say "actualizador en /usr/local/sbin/semillero-actualizar y $LIBEXEC"

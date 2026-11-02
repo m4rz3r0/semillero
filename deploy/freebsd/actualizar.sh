@@ -32,6 +32,19 @@
 #    carpetas 755, ficheros 644, el binario 755). Esa carpeta del host se
 #    monta (nullfs, solo lectura) en la jail del servicio (JAIL) en
 #    /usr/local/semillero/releases.
+# 2b. Si se configura GITHUB_REPO (propietario/repositorio de GitHub) y el
+#    buzón no la tiene o no cuadra, la trae de la release vX.Y.Z de ese
+#    repositorio (preparar_github, deploy/lib/precompiladas.sh): el paquete
+#    de FreeBSD y SHA256SUMS por https con fetch, su atestación de la API de
+#    GitHub sin token y «gh attestation verify --bundle», que tiene que ser
+#    de GITHUB_REPO, de refs/tags/vX.Y.Z y firmada por
+#    .github/workflows/release.yml. Después, las mismas comprobaciones que el
+#    buzón salvo el commit (el del repositorio público es otro: lo ata a la
+#    etiqueta la atestación), y la web completa. Se prueba en cada pasada
+#    mientras se espera al buzón (la release sale unos minutos después de la
+#    etiqueta) y una vez más antes de compilar; no en el segundo intento de
+#    una etiqueta que ya falló. Si no está o no cuadra, lo dice en una línea
+#    y sigue como sin GITHUB_REPO. Necesita gh y jq (pkg install gh jq).
 # 3. Si no llega a tiempo o no cuadra, compila aquí, en la jail de
 #    compilación: cargo leptos build --release --precompress, con prioridad
 #    baja, una hora como mucho y TRABAJOS_COMPILACION trabajos de cargo a la
@@ -94,6 +107,9 @@ JAIL_RAIZ=
 JAIL_COMPILAR=semillero-build
 # Minutos de espera a la versión precompilada; vacía, no se mira el buzón.
 PRECOMPILADAS_ESPERA=20
+# Repositorio de GitHub (propietario/repositorio) del que traer la versión
+# publicada, con su atestación; vacío, no se mira GitHub.
+GITHUB_REPO=
 # Trabajos de cargo a la vez; vacía, los que cargo decida (uno por núcleo).
 TRABAJOS_COMPILACION=
 # Dirección:puerto de escucha de semillero en la jail (la de su rc.d), p. ej.
@@ -358,10 +374,34 @@ instalar_precompilada()
 		log "instalada la versión precompilada de $1 (commit $(printf '%.12s' "$3"))"
 		_r=0
 	else
-		error "versión precompilada de $1 rechazada: $(printf '%s' "${_err:-no se puede instalar}" | head -n 1); se compila aquí"
+		error "versión precompilada de $1 rechazada: $(printf '%s' "${_err:-no se puede instalar}" | head -n 1); ${_siguiente:-se compila aquí}"
 	fi
 	rm -rf "$_tmp" "${BUZON:?}/$2"
 	return "$_r"
+}
+
+# Instala en releases/$2 la versión de la etiqueta $1 publicada en GitHub
+# (GITHUB_REPO), con su atestación comprobada (preparar_github). Si no se
+# puede usar, lo dice en una línea (como error si no cuadra; si aún no está,
+# no) y sale con 1: nunca queda nada instalado.
+instalar_github()
+{
+	_tmp=$RELEASES/.$2.tmp
+	rm -rf "$_tmp"
+	_err=$(preparar_github "$GITHUB_REPO" "$2" "$_tmp" 2>&1)
+	_rg=$?
+	_err=$(printf '%s' "${_err:-no se puede instalar}" | head -n 1)
+	if [ "$_rg" -eq 0 ] && asentar "$_tmp" && mv "$_tmp" "$RELEASES/$2"; then
+		log "instalada la versión de GitHub de $1 ($GITHUB_REPO, atestación comprobada)"
+		return 0
+	fi
+	rm -rf "$_tmp"
+	if [ "$_rg" -eq 1 ]; then
+		log "no se usa GitHub para $1: $_err"
+	else
+		error "versión de GitHub de $1 rechazada: $_err"
+	fi
+	return 1
 }
 
 # Compila en la jail de compilación la referencia $1 (commit $3) y deja el
@@ -712,6 +752,10 @@ main()
 	done
 	# shellcheck source=../lib/precompiladas.sh
 	. "$RAIZ$LIBEXEC/precompiladas.sh"
+	if [ -n "$GITHUB_REPO" ] && ! repo_github_valido "$GITHUB_REPO"; then
+		error "GITHUB_REPO tiene que ser propietario/repositorio de GitHub (p. ej. ejemplo/semillero) o vacía"
+		exit 1
+	fi
 	for _orden in tar jexec sockstat file timeout lockf; do
 		command -v "$_orden" >/dev/null 2>&1 || {
 			error "falta $_orden"
@@ -729,6 +773,17 @@ main()
 	if [ -n "$_ref" ]; then
 		desplegar_ref "$_ref"
 		exit 0
+	fi
+	if [ -n "$_comprobar" ] && [ -n "$GITHUB_REPO" ]; then
+		_faltan=
+		for _o in gh jq; do
+			command -v "$_o" >/dev/null 2>&1 || _faltan="$_faltan $_o"
+		done
+		if [ -n "$_faltan" ]; then
+			echo "versiones de GitHub: $GITHUB_REPO (falta:$_faltan; pkg install$_faltan)"
+		else
+			echo "versiones de GitHub: $GITHUB_REPO (gh y jq instalados)"
+		fi
 	fi
 	if [ -n "$_comprobar" ]; then
 		# Sin traer nada: ls-remote no cambia el clon.
@@ -791,17 +846,40 @@ main()
 		if [ -n "$PRECOMPILADAS_ESPERA" ]; then
 			_decision=$(decidir "$_etiqueta" "$_v")
 		fi
+		# GitHub solo en el primer intento de la etiqueta: si ya falló una
+		# vez, se compila aquí (como el buzón, que ya no la tiene).
+		_github=
+		if [ -n "$GITHUB_REPO" ]; then
+			_github=1
+			if [ -f "$ESTADO/intentos" ] && [ "$(sed -n 1p "$ESTADO/intentos")" = "$_etiqueta" ]; then
+				_github=
+			fi
+		fi
+		if [ "$_decision" = esperar ] && [ -z "$_github" ]; then
+			log "esperando la versión precompilada de $_etiqueta (hasta $PRECOMPILADAS_ESPERA min desde que se vio la etiqueta)"
+			exit 0
+		fi
+		if [ "$_decision" != esperar ]; then
+			log "versión nueva $_v (desplegada: ${_hay:-ninguna})"
+		fi
+		# Restos de una ejecución cortada a medias.
+		find "$RELEASES" -maxdepth 1 -name '.*.tmp' -exec rm -rf {} +
+		_siguiente=
+		if [ -n "$_github" ]; then _siguiente="se prueba GitHub"; fi
+		if [ "$_decision" = instalar ] && instalar_precompilada "$_etiqueta" "$_v" "$_commit"; then
+			_decision=instalada
+		fi
+		if [ "$_decision" != instalada ] && [ -n "$_github" ] && instalar_github "$_etiqueta" "$_v"; then
+			_decision=instalada
+		fi
 		if [ "$_decision" = esperar ]; then
 			log "esperando la versión precompilada de $_etiqueta (hasta $PRECOMPILADAS_ESPERA min desde que se vio la etiqueta)"
 			exit 0
 		fi
-		log "versión nueva $_v (desplegada: ${_hay:-ninguna})"
-		# Restos de una ejecución cortada a medias.
-		find "$RELEASES" -maxdepth 1 -name '.*.tmp' -exec rm -rf {} +
-		if [ "$_decision" = instalar ] && instalar_precompilada "$_etiqueta" "$_v" "$_commit"; then
-			_decision=instalada
-		elif [ "$_decision" = compilar ] && [ -n "$PRECOMPILADAS_ESPERA" ]; then
+		if [ "$_decision" = compilar ] && [ -n "$PRECOMPILADAS_ESPERA" ]; then
 			log "no ha llegado la versión precompilada de $_etiqueta; se compila aquí"
+		elif [ "$_decision" = instalar ] && [ -n "$_github" ]; then
+			log "tampoco vale la de GitHub; se compila aquí"
 		fi
 		if [ "$_decision" != instalada ]; then
 			compilar_aqui "refs/tags/$_etiqueta" "$_v" "$_commit"

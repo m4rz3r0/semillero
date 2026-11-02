@@ -110,7 +110,13 @@ La forma fácil es `semillero configurar`: pregunta las direcciones y las
 claves, las comprueba contra qBittorrent y Jellyfin y escribe el fichero
 `VARIABLE=valor` que lee cada forma de instalar (las guías dicen dónde),
 con la contraseña de qBittorrent y la clave de Jellyfin aparte, en ficheros
-solo para su dueño. Para cambiar algo, se vuelve a ejecutar.
+solo para su dueño. Para cambiar algo, se vuelve a ejecutar. Si quitas
+Jellyfin o pasas a la lista blanca, pregunta si borra el fichero de la clave
+que ya no se usa (sin «s», se queda).
+
+`semillero --env FICHERO` arranca con la configuración de ese fichero, en
+cualquier shell (sh, fish, PowerShell); si una variable ya está puesta en
+el entorno, manda sobre la del fichero.
 
 | Variable | Qué es | Por defecto |
 |---|---|---|

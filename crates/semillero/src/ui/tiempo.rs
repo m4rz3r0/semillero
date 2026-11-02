@@ -100,11 +100,18 @@ pub fn Tiempo(franja: Franja) -> impl IntoView {
     let causa = cielo
         .causa()
         .map(|c| view! { <p class="tiempo-causa">{c}</p> });
-    let qbt = (!franja.qbt).then(|| {
-        view! {
+    let qbt = match (franja.qbt, franja.qbt_clave_mala) {
+        (true, _) => None,
+        (false, true) => Some(view! {
+            <p class="tiempo-causa">
+                "qBittorrent no acepta la contraseña de semillero: no se pueden ver las macetas. "
+                "Cámbiala con «semillero configurar» y vuelve a arrancar semillero."
+            </p>
+        }.into_any()),
+        (false, false) => Some(view! {
             <p class="tiempo-causa">"qBittorrent no responde: no se pueden ver las macetas ahora."</p>
-        }
-    });
+        }.into_any()),
+    };
     let sin_vigilar = (!franja.vigilada).then(|| {
         view! {
             <p class="tiempo-causa">

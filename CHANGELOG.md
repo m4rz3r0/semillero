@@ -3,6 +3,25 @@
 Lo que cambia en cada versión publicada. Lo que viene después, en
 [ROADMAP.md](ROADMAP.md).
 
+## 0.4.0
+
+Al actualizar no hay que hacer nada: la base de datos, los presets y las
+variables de configuración no cambian, y lo nuevo es opcional.
+
+- Si qBittorrent no acepta la contraseña con la que entra semillero (modo
+  con contraseña), la web lo dice y explica que se cambia con
+  `semillero configurar`. Antes decía «qBittorrent no responde».
+- `semillero --env FICHERO` arranca con la configuración de ese fichero, en
+  cualquier shell (sh, fish, PowerShell). Las variables ya puestas en el
+  entorno mandan sobre él. La guía «a mano» lo usa en lugar de `set -a`.
+- `semillero configurar` ofrece borrar el fichero de la clave que ya no se
+  usa al quitar Jellyfin o al pasar a la lista blanca (sin «s», se queda).
+- Actualizador de FreeBSD: con `GITHUB_REPO` en su configuración, puede
+  traer la versión de la release de GitHub, comprobando `SHA256SUMS` y la
+  atestación de GitHub (`gh attestation verify`), antes de compilarla en el
+  servidor. Hace falta `pkg install gh jq`. Sin `GITHUB_REPO`, todo sigue
+  igual. Para usarlo, vuelve a pasar `deploy/freebsd/install.sh`.
+
 ## 0.3.2
 
 - La prueba del actualizador pasa shellcheck (aviso SC2209). El programa no

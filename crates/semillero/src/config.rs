@@ -35,6 +35,7 @@
 //! otra IP, o no hay proxy configurado, la cabecera se ignora y vale la IP
 //! de la conexión.
 
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 
@@ -227,6 +228,62 @@ pub fn leer_secreto(ruta: &Path, que: &str) -> Result<String, String> {
         ));
     }
     Ok(texto.to_owned())
+}
+
+/// Más que esto no es un fichero de configuración.
+const MAX_FICHERO_ENV_BYTES: u64 = 64 * 1024;
+
+/// Lee el fichero de configuración `ruta` (`semillero --env`): el que
+/// escribe `semillero configurar`, una variable por línea,
+/// `VARIABLE=valor`, sin comillas; las líneas vacías y las que empiezan por
+/// `#` no cuentan, y si una variable sale dos veces vale la última, como en
+/// systemd. Una línea que no es así para la lectura; el error dice el
+/// fichero y la línea, nunca lo que pone.
+pub fn leer_fichero_env(ruta: &Path) -> Result<HashMap<String, String>, String> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    std::fs::File::open(ruta)
+        .and_then(|f| f.take(MAX_FICHERO_ENV_BYTES + 1).read_to_end(&mut bytes))
+        .map_err(|e| format!("no se puede leer {}: {e}", ruta.display()))?;
+    if bytes.len() as u64 > MAX_FICHERO_ENV_BYTES {
+        return Err(format!("{} es demasiado grande", ruta.display()));
+    }
+    let texto =
+        String::from_utf8(bytes).map_err(|_| format!("{} no es texto UTF-8", ruta.display()))?;
+    let mut vars = HashMap::new();
+    for (n, linea) in texto.lines().enumerate() {
+        let linea = linea.strip_suffix('\r').unwrap_or(linea);
+        if linea.trim().is_empty() || linea.trim_start().starts_with('#') {
+            continue;
+        }
+        let nombre_valido = |k: &str| {
+            !k.is_empty()
+                && !k.starts_with(|c: char| c.is_ascii_digit())
+                && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        };
+        match linea.split_once('=') {
+            Some((k, v)) if nombre_valido(k) => {
+                vars.insert(k.to_owned(), v.to_owned());
+            }
+            _ => {
+                return Err(format!(
+                    "{}, línea {}: no es VARIABLE=valor",
+                    ruta.display(),
+                    n + 1
+                ));
+            }
+        }
+    }
+    Ok(vars)
+}
+
+/// Las variables de `entorno` y, las que no estén ahí, las de `fichero`
+/// (ver [`leer_fichero_env`]): lo que ya está puesto manda.
+pub fn con_fichero(
+    entorno: impl Fn(&str) -> Option<String>,
+    fichero: HashMap<String, String>,
+) -> impl Fn(&str) -> Option<String> {
+    move |k| entorno(k).or_else(|| fichero.get(k).cloned())
 }
 
 /// La contraseña de qBittorrent del modo con contraseña. Los espacios

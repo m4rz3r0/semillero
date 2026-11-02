@@ -538,6 +538,8 @@ struct Respuestas {
     cuenta: Option<(String, String)>,
     jellyfin: Option<(String, String)>,
     secretos: Vec<Respondido>,
+    /// Ficheros de claves que ya no se usan (se ofrece borrarlos).
+    sueltos: Vec<PathBuf>,
 }
 
 fn preguntar(e: &mut Entrada, f: &mut Fichero, secretos: &Path) -> Result<Respuestas, SinEntrada> {
@@ -594,6 +596,7 @@ fn preguntar(e: &mut Entrada, f: &mut Fichero, secretos: &Path) -> Result<Respue
         .unwrap_or_else(|| por_defecto_qbt.into());
 
     let mut respondidos = Vec::new();
+    let mut sueltos = Vec::new();
     let con_contrasena = if f.existe {
         f.valor("SEMILLERO_QBT_CLAVE").is_some()
     } else {
@@ -630,6 +633,7 @@ fn preguntar(e: &mut Entrada, f: &mut Fichero, secretos: &Path) -> Result<Respue
         respondidos.push(s);
         Some((usuario, clave))
     } else {
+        sueltos.extend(f.valor("SEMILLERO_QBT_CLAVE").map(PathBuf::from));
         f.quitar("SEMILLERO_QBT_CLAVE");
         f.quitar("SEMILLERO_QBT_USUARIO");
         None
@@ -660,6 +664,7 @@ fn preguntar(e: &mut Entrada, f: &mut Fichero, secretos: &Path) -> Result<Respue
             |v| validar_url(v, "http://192.0.2.20:8096"),
         )?;
         if matches!(r, Respuesta::Quitar) {
+            sueltos.extend(f.valor("SEMILLERO_JELLYFIN_CLAVE").map(PathBuf::from));
             f.quitar("SEMILLERO_JELLYFIN_CLAVE");
         }
         f.aplicar("SEMILLERO_JELLYFIN", r);
@@ -707,6 +712,7 @@ fn preguntar(e: &mut Entrada, f: &mut Fichero, secretos: &Path) -> Result<Respue
         cuenta,
         jellyfin,
         secretos: respondidos,
+        sueltos,
     })
 }
 
@@ -779,6 +785,30 @@ async fn comprobar(f: &Fichero, r: &Respuestas) -> bool {
     todo_bien
 }
 
+/// Ofrece borrar cada fichero de clave que la configuración ya no usa. Sin
+/// «s» (también sin respuesta) se queda.
+fn borrar_sueltos(e: &mut Entrada, r: &Respuestas) {
+    for ruta in &r.sueltos {
+        if !ruta.is_file() || r.secretos.iter().any(|s| s.ruta == *ruta) {
+            continue;
+        }
+        let pregunta = format!(
+            "La configuración ya no usa {}. ¿Borrar el fichero antiguo {}?",
+            ruta.file_name()
+                .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
+            ruta.display()
+        );
+        if !matches!(e.si(&pregunta), Ok(true)) {
+            println!("Se queda {}.", ruta.display());
+            continue;
+        }
+        match std::fs::remove_file(ruta) {
+            Ok(()) => println!("Borrado {}.", ruta.display()),
+            Err(err) => println!("No se puede borrar {}: {err}", ruta.display()),
+        }
+    }
+}
+
 // ---------------------------------------------------------------- todo junto
 
 async fn configurar(op: &Opciones) -> Result<ExitCode, String> {
@@ -840,6 +870,7 @@ async fn configurar(op: &Opciones) -> Result<ExitCode, String> {
             .map_err(|e| format!("no se puede guardar {}: {e}", op.env.display()))?;
         println!("Configuración guardada en {}.", op.env.display());
     }
+    borrar_sueltos(&mut e, &r);
     println!("Reinicia semillero para que la use.");
     Ok(ExitCode::SUCCESS)
 }

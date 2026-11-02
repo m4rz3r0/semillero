@@ -259,3 +259,74 @@ fn un_fichero_de_contrasena_que_leen_otros_se_nota() {
     std::fs::set_permissions(&fichero, std::fs::Permissions::from_mode(0o640)).unwrap();
     assert!(legible_por_otros(&fichero));
 }
+
+// ---------------------------------------------------------------- --env FICHERO
+
+mod fichero_env {
+    use semillero::config::{Config, con_fichero, leer_fichero_env};
+
+    fn escribir(texto: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let ruta = dir.path().join("semillero.env");
+        std::fs::write(&ruta, texto).unwrap();
+        (dir, ruta)
+    }
+
+    #[test]
+    fn lee_lo_que_escribe_configurar() {
+        let (_d, ruta) = escribir(
+            "# Configuración de semillero\r\n\
+             \r\n\
+             SEMILLERO_LISTEN=192.0.2.10:8090\r\n\
+             SEMILLERO_QBT=http://192.0.2.20:8080\r\n\
+             SEMILLERO_ORIGEN=https://semillero.example\r\n\
+             SEMILLERO_QBT=http://192.0.2.21:8080\r\n\
+             OTRA=a=b",
+        );
+        let f = leer_fichero_env(&ruta).unwrap();
+        // La última línea de cada variable manda, como en systemd.
+        assert_eq!(f["SEMILLERO_QBT"], "http://192.0.2.21:8080");
+        // El valor llega tal cual, con lo que haya tras el primer «=».
+        assert_eq!(f["OTRA"], "a=b");
+        assert_eq!(f.len(), 4);
+        let c = Config::desde(con_fichero(|_| None, f)).unwrap();
+        assert_eq!(c.escucha, "192.0.2.10:8090".parse().unwrap());
+        assert_eq!(c.qbt, "http://192.0.2.21:8080");
+        assert_eq!(c.origenes, vec!["https://semillero.example"]);
+    }
+
+    #[test]
+    fn las_variables_del_entorno_mandan_sobre_el_fichero() {
+        let (_d, ruta) = escribir("SEMILLERO_QBT=http://192.0.2.20:8080\nSEMILLERO_PORT=9000\n");
+        let f = leer_fichero_env(&ruta).unwrap();
+        let entorno =
+            |k: &str| (k == "SEMILLERO_QBT").then(|| "http://198.51.100.5:8080".to_owned());
+        let c = Config::desde(con_fichero(entorno, f)).unwrap();
+        assert_eq!(c.qbt, "http://198.51.100.5:8080");
+        assert_eq!(c.escucha.port(), 9000);
+    }
+
+    #[test]
+    fn una_linea_que_no_es_variable_para_y_no_ensena_el_valor() {
+        let (_d, ruta) = escribir("SEMILLERO_PORT=9000\n# bien\nesto-es-secreto\n");
+        let e = leer_fichero_env(&ruta).unwrap_err();
+        assert!(e.contains(&ruta.display().to_string()), "{e}");
+        assert!(e.contains("línea 3"), "{e}");
+        assert!(!e.contains("esto-es-secreto"), "{e}");
+        let (_d, ruta) = escribir("SEMILLERO PORT=9000\n");
+        let e = leer_fichero_env(&ruta).unwrap_err();
+        assert!(e.contains("línea 1"), "{e}");
+        assert!(!e.contains("9000"), "{e}");
+    }
+
+    #[test]
+    fn sin_fichero_o_demasiado_grande_lo_dice() {
+        let dir = tempfile::tempdir().unwrap();
+        let ruta = dir.path().join("no-esta.env");
+        let e = leer_fichero_env(&ruta).unwrap_err();
+        assert!(e.contains("no-esta.env"), "{e}");
+        let (_d, ruta) = escribir(&format!("SEMILLERO_PORT={}\n", "9".repeat(70 * 1024)));
+        let e = leer_fichero_env(&ruta).unwrap_err();
+        assert!(e.contains("demasiado grande"), "{e}");
+    }
+}

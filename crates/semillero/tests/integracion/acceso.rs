@@ -224,8 +224,13 @@ async fn reautenticacion_para_lo_delicado() {
 /// `SEMILLERO_LOGIN_DESDE`: las comprobaciones no se atan a ninguna IP (con
 /// qBittorrent en otra máquina, atarlas a 127.0.0.1 daba EINVAL y un 503).
 async fn con_contrasena(conf: qbt_sim::Conf, dir: &std::path::Path) -> Prueba {
+    con_clave_en_fichero(conf, dir, CLAVE).await
+}
+
+/// Como [`con_contrasena`], con `clave` en el fichero.
+async fn con_clave_en_fichero(conf: qbt_sim::Conf, dir: &std::path::Path, clave: &str) -> Prueba {
     let fichero = dir.join("qbt.clave");
-    std::fs::write(&fichero, format!("{CLAVE}\n")).unwrap();
+    std::fs::write(&fichero, format!("{clave}\n")).unwrap();
     con_sim_y(conf, |c| {
         c.login_desde = None;
         c.cuenta_qbt = Some(semillero::config::ConfCuentaQbt {
@@ -280,6 +285,53 @@ async fn con_contrasena_funciona_sin_lista_blanca() {
         login(&p, USUARIO, "mala").await.status(),
         StatusCode::UNAUTHORIZED
     );
+}
+
+#[tokio::test]
+async fn con_la_contrasena_del_servicio_equivocada_la_portada_lo_dice() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = con_clave_en_fichero(qbt_sim::Conf::default(), dir.path(), "caducada").await;
+    p.sim()
+        .control
+        .fijar_torrents(vec![torrent(&"a".repeat(40))]);
+    // Quien entra en la web lo hace con su propia contraseña, que sí vale.
+    let d = portada(&p).await;
+    assert_eq!(d["franja"]["qbt"], false, "{d}");
+    assert_eq!(d["franja"]["qbt_clave_mala"], true, "{d}");
+    let cookie = sesion(&p).await;
+    let html = texto(enviar(&p.app, get("/", Some(&cookie))).await).await;
+    assert!(
+        html.contains("qBittorrent no acepta la contraseña de semillero"),
+        "{html}"
+    );
+    assert!(html.contains("semillero configurar"), "{html}");
+    assert!(!html.contains("qBittorrent no responde"), "{html}");
+}
+
+#[tokio::test]
+async fn si_qbittorrent_falla_por_otra_cosa_la_portada_sigue_diciendo_que_no_responde() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = con_contrasena(qbt_sim::Conf::default(), dir.path()).await;
+    let cookie = sesion(&p).await;
+    let tok = token(&p, &cookie).await;
+    p.sim().control.olvidar_sesiones();
+    p.sim().control.banear(true);
+    let resp = enviar(
+        &p.app,
+        crate::interfaz::api(
+            "/api/portada",
+            serde_json::json!({}),
+            Some(&cookie),
+            Some(&tok),
+        ),
+    )
+    .await;
+    let d: serde_json::Value = serde_json::from_str(&texto(resp).await).unwrap();
+    assert_eq!(d["franja"]["qbt"], false, "{d}");
+    assert_eq!(d["franja"]["qbt_clave_mala"], false, "{d}");
+    let html = texto(enviar(&p.app, get("/", Some(&cookie))).await).await;
+    assert!(html.contains("qBittorrent no responde"), "{html}");
+    assert!(!html.contains("no acepta la contraseña"), "{html}");
 }
 
 #[tokio::test]

@@ -1,4 +1,5 @@
-//! Servidor de semillero. La configuración, por variables de entorno (ver
+//! Servidor de semillero. La configuración, por variables de entorno o con
+//! `--env FICHERO` (ver
 //! `semillero::config`); `semillero configurar` la pregunta y la escribe
 //! (ver `semillero::configurar`).
 
@@ -6,6 +7,9 @@
 const AYUDA: &str = "\
 Uso:
   semillero               arranca el servidor (configuración en variables de entorno)
+  semillero --env FICHERO arranca el servidor con la configuración de FICHERO
+                          (el que escribe semillero configurar); las variables
+                          de entorno que ya estén puestas mandan sobre él
   semillero configurar    pregunta las direcciones y las claves y las guarda
                           (semillero configurar --help para sus opciones)
   semillero --version     dice la versión
@@ -21,8 +25,16 @@ async fn main() -> std::process::ExitCode {
     use semillero::{auth, config::Config, construir_router, estado::AppState};
 
     let mut args = std::env::args_os().skip(1);
+    let mut fichero = None;
     match args.next() {
         None => {}
+        Some(a) if a == "--env" => match (args.next(), args.next()) {
+            (Some(f), None) => fichero = Some(std::path::PathBuf::from(f)),
+            _ => {
+                eprintln!("semillero: uso: semillero --env FICHERO\n\n{AYUDA}");
+                return ExitCode::from(2);
+            }
+        },
         Some(a) if a == "configurar" => {
             return semillero::configurar::ejecutar(args.collect()).await;
         }
@@ -39,8 +51,17 @@ async fn main() -> std::process::ExitCode {
             return ExitCode::from(2);
         }
     }
-    iniciar_registro();
-    let cfg = match Config::desde_entorno() {
+    let fichero = match fichero.as_deref().map(semillero::config::leer_fichero_env) {
+        None => Default::default(),
+        Some(Ok(f)) => f,
+        Some(Err(e)) => {
+            eprintln!("semillero: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let leer = semillero::config::con_fichero(|k| std::env::var(k).ok(), fichero);
+    iniciar_registro(leer("SEMILLERO_LOG"));
+    let cfg = match Config::desde(&leer) {
         Ok(cfg) => cfg,
         Err(e) => {
             eprintln!("semillero: configuración no válida: {e}");
@@ -59,7 +80,7 @@ async fn main() -> std::process::ExitCode {
     // `LEPTOS_SITE_ROOT`.
     leptos.site_addr = cfg.escucha;
     let exe = std::env::current_exe().ok();
-    let raiz = semillero::config::raiz_web(|k| std::env::var(k).ok(), exe.as_deref());
+    let raiz = semillero::config::raiz_web(&leer, exe.as_deref());
     leptos.site_root = raiz.to_string_lossy().as_ref().into();
     configurar_hash(&mut leptos);
     let escucha = cfg.escucha;
@@ -136,10 +157,11 @@ async fn al_parar() {
 
 /// Registros a stderr; nivel según `SEMILLERO_LOG`, por defecto `info`.
 #[cfg(feature = "ssr")]
-fn iniciar_registro() {
+fn iniciar_registro(nivel: Option<String>) {
     use tracing_subscriber::EnvFilter;
-    let filtro =
-        EnvFilter::try_from_env("SEMILLERO_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
+    let filtro = nivel
+        .and_then(|n| EnvFilter::try_new(n).ok())
+        .unwrap_or_else(|| EnvFilter::new("info"));
     tracing_subscriber::fmt()
         .with_env_filter(filtro)
         .with_writer(std::io::stderr)

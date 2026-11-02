@@ -18,11 +18,15 @@ compilarla:
 - **En el propio servidor**, en una jail de compilación sin privilegios, si
   no llega al buzón a tiempo (o si no usas el PC).
 
+Y, si quieres, el servidor puede tomar la versión que publica GitHub
+(`GITHUB_REPO`): la de la release `vX.Y.Z`, con su atestación de origen
+comprobada. Ver [Versiones de GitHub](#versiones-de-github-opcional).
+
 Cada 15 minutos `semillero-actualizar` trae las etiquetas, se queda con la
 más alta y, si es nueva, espera `PRECOMPILADAS_ESPERA` minutos a que llegue
 al buzón. La comprueba (sha256, solo ficheros normales, el commit de la
-etiqueta, un ejecutable de FreeBSD x86-64) o, si no llega o no cuadra, la
-compila. La deja en `/usr/local/semillero/releases/X.Y.Z` (montada en solo
+etiqueta, un ejecutable de FreeBSD x86-64); si no llega o no cuadra, la trae
+de GitHub (con `GITHUB_REPO`) y, si tampoco, la compila. La deja en `/usr/local/semillero/releases/X.Y.Z` (montada en solo
 lectura en la jail del servicio), para el servicio, copia la base de datos,
 cambia el enlace `current`, arranca y espera hasta 60 s a que `/salud` (en
 `ESCUCHA`) responda con la versión nueva. Si no, vuelve a la anterior con la
@@ -63,6 +67,7 @@ valor obligatorio, `install.sh` y el actualizador dicen cuál y no hacen nada.
 | `INTERFAZ_EXT` | interfaz del `nat` de la jail de compilación | hueco por rellenar |
 | `PRECOMPILADAS_ESPERA` | minutos de espera al buzón (vacía: no se mira) | `20` |
 | `TRABAJOS_COMPILACION` | trabajos de cargo a la vez (vacía: uno por núcleo) | vacía |
+| `GITHUB_REPO` | repositorio de GitHub `propietario/repositorio` del que traer la versión publicada, con su atestación (vacía: no se mira GitHub); necesita `gh` y `jq` | vacía |
 | `USUARIO_COMPILAR`, `UID_COMPILAR` | usuario sin privilegios que compila | `smbuild`, `3170` |
 | `USUARIO_BUZON`, `UID_BUZON` | usuario del buzón | `smentrega`, `3171` |
 
@@ -140,12 +145,61 @@ ssh -i ~/.ssh/semillero-buzon -o IdentitiesOnly=yes smentrega@servidor.example r
 
 El servidor la instala en la siguiente pasada del cron.
 
+## Versiones de GitHub (opcional)
+
+Con `GITHUB_REPO=propietario/repositorio` (el repositorio público donde
+`release.yml` publica las versiones, p. ej. `m4rz3r0/semillero`), el
+actualizador puede instalar el paquete de FreeBSD de la release `vX.Y.Z`
+en vez de compilarlo. Necesita en el host `pkg install gh jq`; `install.sh`
+lo comprueba y, si falta, dice qué paquete y para. No hace falta sesión de
+`gh` ni token.
+
+Para una etiqueta nueva, en este orden:
+
+1. **El buzón**, como siempre (si `PRECOMPILADAS_ESPERA` no está vacía y ya
+   ha llegado).
+2. **GitHub**: descarga (con `fetch`, límites de tamaño y de tiempo) el
+   paquete `semillero-X.Y.Z-x86_64-unknown-freebsd.tar.gz` y `SHA256SUMS`,
+   comprueba el sha256 con la línea del paquete, trae la atestación de
+   `https://api.github.com/repos/<GITHUB_REPO>/attestations/sha256:<sha256>`
+   (sin token; `jq` saca cada `bundle`) y la comprueba con esto (`gh` baja
+   la raíz de confianza de Sigstore: el host necesita salida HTTPS a GitHub
+   y a Sigstore):
+
+   ```sh
+   gh attestation verify <paquete> --bundle <atestaciones.jsonl> \
+       --repo <GITHUB_REPO> --source-ref refs/tags/vX.Y.Z \
+       --signer-workflow <GITHUB_REPO>/.github/workflows/release.yml
+   ```
+
+   Luego, las comprobaciones del buzón (solo ficheros normales, una sola
+   carpeta, un ejecutable de FreeBSD x86-64) y la web completa. No se mira
+   que `COMMIT` sea el de la etiqueta: el repositorio público es una copia
+   aplanada y sus commits son otros; lo que ata el paquete a la etiqueta es
+   la atestación. De lo que trae solo se instalan `semillero`, `site/` y
+   `COMMIT` (no `LICENSE`, los README ni `rc.d/`).
+3. **Compilar aquí**, como siempre.
+
+La release sale unos minutos después de la etiqueta: mientras espera al
+buzón, el actualizador prueba GitHub en cada pasada. Sin PC de compilación,
+pon `PRECOMPILADAS_ESPERA=30` para darle tiempo antes de compilar. Si
+GitHub no la tiene aún, lo dice en el registro (`no se usa GitHub para
+vX.Y.Z: …`); si el sha256 o la atestación no cuadran, es un `ERROR` (`versión
+de GitHub de vX.Y.Z rechazada: …`), no se instala nada y sigue como sin
+`GITHUB_REPO`. Si la versión de GitHub falla al desplegarse, el segundo
+intento de esa etiqueta ya no la usa: compila aquí.
+
+`gh` y `jq` corren como root, pero solo leen lo descargado (como `tar` y
+`file` con el buzón), en una carpeta propia y con una casa vacía; nada de lo
+descargado se ejecuta antes de comprobarlo.
+
 ## Qué ha pasado
 
 - `/var/log/semillero-update.log`: versión nueva, espera, instalada o
   rechazada (y por qué), compilación, despliegue, vuelta atrás y errores.
 - `/var/log/semillero-build.log`: la última compilación en el servidor.
-- `semillero-actualizar --comprobar`: qué haría, sin cambiar nada.
+- `semillero-actualizar --comprobar`: qué haría, sin cambiar nada (con
+  `GITHUB_REPO`, también el repositorio y si están `gh` y `jq`).
 - En el PC, `~/semillero-cross/compilacion.log` y `~/semillero-cross/salida/`.
 
 Solo hay una compilación a la vez en el host: se toma el cerrojo

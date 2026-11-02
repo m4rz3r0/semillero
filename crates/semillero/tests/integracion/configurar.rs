@@ -525,3 +525,93 @@ async fn sin_configurar_sigue_siendo_el_servidor_y_una_orden_rara_falla() {
     assert!(String::from_utf8_lossy(&o.stderr).contains("semillero configurar [--env FICHERO]"));
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
 }
+
+/// La ruta que pone `k` en el fichero de configuración.
+fn ruta_en(env: &Path, k: &str) -> PathBuf {
+    leer(env)
+        .lines()
+        .find_map(|l| l.strip_prefix(&format!("{k}=")).map(PathBuf::from))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn al_quitar_jellyfin_ofrece_borrar_su_clave_y_por_defecto_la_deja() {
+    let sim = qbt_sim::arrancar(sim_conf()).await;
+    let jf = jellyfin_falso().await;
+    let dir = tempfile::tempdir().unwrap();
+    let env = dir.path().join("semillero.env");
+    assert!(completo(dir.path(), &sim.url, &jf).await.exito);
+    let clave = ruta_en(&env, "SEMILLERO_JELLYFIN_CLAVE");
+    assert!(clave.exists());
+    // Jellyfin fuera con «-»; a la pregunta de borrar, Intro: se queda.
+    let s = configurar(
+        dir.path(),
+        &["", "", "", "", "", "", "", "-", "", "", ""],
+        &[],
+    )
+    .await;
+    assert!(s.exito, "{}", s.texto);
+    assert!(
+        s.texto
+            .contains(&format!("¿Borrar el fichero antiguo {}?", clave.display())),
+        "{}",
+        s.texto
+    );
+    assert!(clave.exists(), "sin «s» no se borra nada");
+    assert!(!leer(&env).contains("SEMILLERO_JELLYFIN"));
+    sin_secretos(&s, &env);
+}
+
+#[tokio::test]
+async fn al_quitar_jellyfin_con_s_borra_su_clave() {
+    let sim = qbt_sim::arrancar(sim_conf()).await;
+    let jf = jellyfin_falso().await;
+    let dir = tempfile::tempdir().unwrap();
+    let env = dir.path().join("semillero.env");
+    assert!(completo(dir.path(), &sim.url, &jf).await.exito);
+    let clave = ruta_en(&env, "SEMILLERO_JELLYFIN_CLAVE");
+    let qbt = ruta_en(&env, "SEMILLERO_QBT_CLAVE");
+    let s = configurar(
+        dir.path(),
+        &["", "", "", "", "", "", "", "-", "", "", "s"],
+        &[],
+    )
+    .await;
+    assert!(s.exito, "{}", s.texto);
+    assert!(!clave.exists(), "{}", s.texto);
+    // La de qBittorrent sigue en uso: ni se pregunta.
+    assert!(qbt.exists());
+    assert!(!s.texto.contains(&qbt.display().to_string()), "{}", s.texto);
+    sin_secretos(&s, &env);
+}
+
+#[tokio::test]
+async fn al_pasar_a_la_lista_blanca_ofrece_borrar_la_contrasena() {
+    let sim = qbt_sim::arrancar(sim_conf()).await;
+    let jf = jellyfin_falso().await;
+    let dir = tempfile::tempdir().unwrap();
+    let env = dir.path().join("semillero.env");
+    assert!(completo(dir.path(), &sim.url, &jf).await.exito);
+    let qbt = ruta_en(&env, "SEMILLERO_QBT_CLAVE");
+    let abierto = qbt_sim::arrancar(qbt_sim::Conf {
+        api_abierta: true,
+        ..sim_conf()
+    })
+    .await;
+    let s = configurar(
+        dir.path(),
+        &["", "", &abierto.url, "2", "", "", "", "", "", "s"],
+        &[],
+    )
+    .await;
+    assert!(s.exito, "{}", s.texto);
+    assert!(
+        s.texto
+            .contains(&format!("¿Borrar el fichero antiguo {}?", qbt.display())),
+        "{}",
+        s.texto
+    );
+    assert!(!qbt.exists());
+    assert!(!leer(&env).contains("SEMILLERO_QBT_CLAVE"));
+    sin_secretos(&s, &env);
+}

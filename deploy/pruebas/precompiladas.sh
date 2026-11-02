@@ -18,6 +18,14 @@
 #    de Linux, carpeta con otro nombre o algo más al lado, un enlace
 #    simbólico o duro dentro, sin site/, sin COMMIT y un enlace en el buzón.
 #    precompilada_llegada no da por llegada una versión sin SHA256SUMS.
+# 4b. preparar_github (con fetch y gh de mentira y el jq de verdad) acepta
+#    la versión de una release buena (deja solo semillero, site/ y COMMIT,
+#    aunque COMMIT sea otro y traiga LICENSE, README y rc.d/) y llama a gh
+#    con el repositorio, la etiqueta y el flujo; rechaza (2) un sha256 que no
+#    cuadra, SHA256SUMS sin la línea del paquete, una atestación de otra
+#    etiqueta o de otro repositorio, un binario de Linux y la web incompleta;
+#    no la usa (1) sin release o sin atestación; no descarga más del máximo.
+#    repo_github_valido solo acepta propietario/repositorio.
 # 5. recibir-precompilada.sh guarda lo admitido y rechaza versiones y
 #    nombres no válidos, órdenes con más argumentos, ficheros vacíos o
 #    demasiado grandes (sin dejar restos); conserva 3 versiones.
@@ -38,7 +46,7 @@
 #    acepta. --ultima no repite lo entregado.
 #
 # Uso: deploy/pruebas/precompiladas.sh (desde cualquier sitio; necesita bash,
-# git, tar, gzip, file, sha256sum, rsync y flock).
+# git, tar, gzip, file, sha256sum, rsync, flock y jq).
 
 set -eu
 
@@ -58,7 +66,7 @@ GIT_COMMITTER_NAME=prueba
 GIT_COMMITTER_EMAIL=prueba
 export HOME GIT_CONFIG_NOSYSTEM GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL
 
-for orden in bash git tar gzip file sha256sum rsync flock; do
+for orden in bash git tar gzip file sha256sum rsync flock jq; do
 	command -v "$orden" >/dev/null 2>&1 || {
 		echo "FALLO: falta $orden" >&2
 		exit 1
@@ -238,6 +246,173 @@ if preparar_precompilada "$B" "$V" "$C" "$TMP/malo" 2>/dev/null; then
 	fallo "acepta un paquete del buzón que es un enlace"
 fi
 rm -rf "${B:?}/$V" "$TMP/malo"
+
+# --- 4b. la versión publicada en GitHub ------------------------------------------
+# fetch y gh de mentira: fetch sirve lo de $W/web (github.com) y $W/api
+# (api.github.com); gh da por buena una atestación {"falsa":"<sha256>
+# <repo> <ref> <flujo>"} que case con el paquete y con lo que se le pide. jq
+# es el de verdad.
+W=$TMP/github
+FG=$TMP/falsos-github
+mkdir -p "$W" "$FG"
+cat >"$FG/fetch" <<EOF
+#!/bin/sh
+for u; do :; done
+printf '%s\n' "\$u" >>"$W/fetch.log"
+case \$u in
+https://github.com/*) f="$W/web/\${u#https://github.com/}" ;;
+https://api.github.com/*) f="$W/api/\${u#https://api.github.com/}" ;;
+*) exit 1 ;;
+esac
+[ -f "\$f" ] || { echo "fetch: \$u: Not Found" >&2; exit 1; }
+cat "\$f"
+EOF
+cat >"$FG/gh" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >>"$W/gh.log"
+[ "\$1 \$2" = "attestation verify" ] || exit 2
+f=\$3
+shift 3
+b= r= ref= w=
+while [ \$# -gt 0 ]; do
+	case \$1 in
+	--bundle) b=\$2 ;;
+	--repo) r=\$2 ;;
+	--source-ref) ref=\$2 ;;
+	--signer-workflow) w=\$2 ;;
+	*) exit 2 ;;
+	esac
+	shift 2
+done
+d=\$(sha256sum <"\$f" | cut -c1-64)
+grep -qxF "{\"falsa\":\"\$d \$r \$ref \$w\"}" "\$b" && exit 0
+echo "Error: verification failed" >&2
+exit 1
+EOF
+chmod 755 "$FG"/*
+RG=ejemplo/semillero
+
+# Publica en el GitHub de mentira la versión $1 del repositorio $RG como la
+# publica release.yml: el paquete con LICENSE, README.md, README.en.md y
+# rc.d/, un COMMIT del repositorio público, SHA256SUMS con más paquetes y
+# su atestación. Variantes ($2): buena, sha-malo, sin-linea, otra-etiqueta,
+# otro-repo, sin-atestacion, linux, sin-web.
+publicar_github()
+{
+	_ver=$1
+	_variante=${2:-buena}
+	_arch=$(archivo_precompilada "$_ver")
+	_raiz=${_arch%.tar.gz}
+	_rel=$W/web/$RG/releases/download/v$_ver
+	_t=$TMP/hacer-github
+	rm -rf "$_t" "$_rel" "$W/api"
+	mkdir -p "$_t/$_raiz/site/pkg" "$_t/$_raiz/rc.d" "$_rel" "$W/api/repos/$RG/attestations"
+	if [ "$_variante" = linux ]; then
+		elf 0 >"$_t/$_raiz/semillero"
+	else
+		elf 9 >"$_t/$_raiz/semillero"
+	fi
+	printf 'js: abc\nwasm: abc\ncss: abc\n' >"$_t/$_raiz/site/hash.txt"
+	for _e in js wasm css; do echo "$_e" >"$_t/$_raiz/site/pkg/semillero.abc.$_e"; done
+	if [ "$_variante" = sin-web ]; then rm -f "$_t/$_raiz/site/pkg/semillero.abc.wasm"; fi
+	printf '%040d\n' 0 | tr 0 c >"$_t/$_raiz/COMMIT"
+	for _f in LICENSE README.md README.en.md rc.d/semillero; do echo "$_f" >"$_t/$_raiz/$_f"; done
+	(cd "$_t" && tar -czf "$_rel/$_arch" -- "$_raiz")
+	_d=$(sha256sum <"$_rel/$_arch" | cut -c1-64)
+	{
+		echo "$(printf '%064d' 1)  semillero-$_ver-x86_64-unknown-linux-gnu.tar.gz"
+		case $_variante in
+		sha-malo) echo "$(printf '%064d' 2)  $_arch" ;;
+		sin-linea) ;;
+		*) echo "$_d  $_arch" ;;
+		esac
+		echo "$(printf '%064d' 3)  semillero-$_ver-x86_64-pc-windows-msvc.zip"
+	} >"$_rel/SHA256SUMS"
+	_ref=refs/tags/v$_ver
+	_r=$RG
+	case $_variante in
+	otra-etiqueta) _ref=refs/tags/v9.9.9 ;;
+	otro-repo) _r=otro/semillero ;;
+	esac
+	if [ "$_variante" != sin-atestacion ]; then
+		printf '{"attestations":[{"bundle":{"falsa":"%s %s %s %s/.github/workflows/release.yml"},"repository_id":1}]}\n' \
+			"$_d" "$_r" "$_ref" "$_r" >"$W/api/repos/$RG/attestations/sha256:$_d"
+	fi
+}
+
+for r in ejemplo/semillero Ejemplo-1/semi.llero_2 a/b; do
+	repo_github_valido "$r" || fallo "repo_github_valido rechaza $r"
+done
+for r in '' ejemplo ejemplo/ /semillero ejemplo/semillero/x -ejemplo/semillero ejemplo/. ejemplo/.. \
+	'ejemplo/semi llero' 'ejemplo/semillero;id' 'ej_emplo/semillero' 'ejemplo/$(id)' \
+	"$(printf '%040d' 0 | tr 0 a)/semillero" 'ejemplo/semillero
+x'; do
+	if repo_github_valido "$r"; then fallo "repo_github_valido acepta «$r»"; fi
+done
+
+V=2.0.0
+publicar_github "$V"
+: >"$W/gh.log"
+if PATH=$FG:$PATH preparar_github "$RG" "$V" "$TMP/gh-bueno" 2>"$TMP/err"; then
+	[ "$(find "$TMP/gh-bueno" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort | tr '\n' ' ')" = "COMMIT semillero site " ] ||
+		fallo "GitHub: no queda solo con semillero, site/ y COMMIT"
+else
+	fallo "GitHub: rechaza la versión buena: $(cat "$TMP/err")"
+fi
+case $(cat "$W/gh.log") in
+"attestation verify "*" --bundle "*" --repo $RG --source-ref refs/tags/v$V --signer-workflow $RG/.github/workflows/release.yml") ;;
+*) fallo "GitHub: gh no se llama como se espera: $(cat "$W/gh.log")" ;;
+esac
+grep -qxF "https://github.com/$RG/releases/download/v$V/$(archivo_precompilada "$V")" "$W/fetch.log" ||
+	fallo "GitHub: no descarga el paquete de la release: $(cat "$W/fetch.log")"
+grep -q "^https://api.github.com/repos/$RG/attestations/sha256:[0-9a-f]\{64\}\$" "$W/fetch.log" ||
+	fallo "GitHub: no trae la atestación de la API: $(cat "$W/fetch.log")"
+
+# rechazar_github VARIANTE CÓDIGO MOTIVO: preparar_github sale con CÓDIGO (1:
+# no está, 2: no vale), lo dice y no deja nada.
+rechazar_github()
+{
+	rm -rf "$TMP/gh-malo"
+	_rc=0
+	PATH=$FG:$PATH preparar_github "$RG" "$V" "$TMP/gh-malo" 2>"$TMP/err" || _rc=$?
+	if [ "$_rc" -ne "$2" ]; then
+		fallo "GitHub $1: sale con $_rc, no con $2 ($(cat "$TMP/err"))"
+	elif ! grep -q "$3" "$TMP/err"; then
+		fallo "GitHub $1: el motivo no dice «$3»: $(cat "$TMP/err")"
+	fi
+	[ ! -e "$TMP/gh-malo" ] || fallo "GitHub $1: deja la carpeta de destino"
+}
+for v in sha-malo sin-linea otra-etiqueta otro-repo sin-atestacion linux sin-web; do
+	publicar_github "$V" "$v"
+	case $v in
+	sha-malo) rechazar_github "$v" 2 "no coincide con SHA256SUMS" ;;
+	sin-linea) rechazar_github "$v" 2 "SHA256SUMS de GitHub" ;;
+	otra-etiqueta | otro-repo) rechazar_github "$v" 2 "atestación" ;;
+	sin-atestacion) rechazar_github "$v" 1 "atestaci" ;;
+	linux) rechazar_github "$v" 2 FreeBSD ;;
+	sin-web) rechazar_github "$v" 2 "falta site/pkg" ;;
+	esac
+done
+rm -rf "$W/web/$RG/releases/download/v$V"
+rechazar_github "sin release" 1 "no se puede descargar"
+publicar_github "$V"
+rechazar_github_repo()
+{
+	if PATH=$FG:$PATH preparar_github "$1" "$V" "$TMP/gh-malo" 2>"$TMP/err"; then
+		fallo "GitHub: acepta el repositorio «$1»"
+	fi
+	[ ! -e "$TMP/gh-malo" ] || fallo "GitHub: deja la carpeta con el repositorio «$1»"
+}
+rechazar_github_repo 'ejemplo/semillero/../x'
+rechazar_github_repo '-ejemplo/semillero'
+# Un paquete más grande que el máximo no se descarga entero.
+publicar_github "$V"
+if PATH=$FG:$PATH GITHUB_MAX_PAQUETE=100 preparar_github "$RG" "$V" "$TMP/gh-malo" 2>"$TMP/err"; then
+	fallo "GitHub: acepta un paquete más grande que el máximo"
+fi
+grep -q "no se puede descargar" "$TMP/err" || fallo "GitHub: no dice que el paquete es demasiado grande: $(cat "$TMP/err")"
+rm -rf "$TMP/gh-bueno" "$TMP/gh-malo"
+V=1.2.3
 
 # --- 5. el receptor del buzón ---------------------------------------------------
 R=$TMP/receptor

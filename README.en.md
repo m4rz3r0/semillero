@@ -116,7 +116,13 @@ The easy way is `semillero configurar`: it asks (in Spanish) for the
 addresses and keys, checks them against qBittorrent and Jellyfin and writes
 the `VARIABLE=value` file each install method reads (the guides say where),
 with the qBittorrent password and the Jellyfin key apart, in files only
-their owner can read. Run it again to change anything.
+their owner can read. Run it again to change anything. If you remove
+Jellyfin or switch to the whitelist, it asks whether to delete the key file
+that is no longer used (it stays unless you answer «s»).
+
+`semillero --env FILE` starts with the settings in that file, from any
+shell (sh, fish, PowerShell); a variable already set in the environment
+wins over the one in the file.
 
 | Variable | What it is | Default |
 |---|---|---|

@@ -38,11 +38,18 @@
 # y el puerto se miran en la ESCUCHA de la configuración (también IPv6); (l)
 # install.sh en una carpeta: plantilla y parada sin configuración, parada si
 # falta un valor, y lo que escribe; (v) install.sh con otra jail, otro usuario
-# del buzón y el puerto del servidor git por defecto. Todas las
+# del buzón y el puerto del servidor git por defecto; (x) GITHUB_REPO: sin
+# él no se llama a fetch ni a gh del host; con él, la versión de GitHub se
+# instala con su atestación mientras se espera al buzón; un sha256 malo o
+# una atestación que no cuadra no instalan nada y siguen como siempre
+# (esperar o compilar aquí); sin release, lo dice y compila; el buzón va
+# primero; el 2.º intento de una etiqueta compila aquí; --comprobar dice la
+# fuente; un GITHUB_REPO no válido para todo; (y) install.sh con
+# GITHUB_REPO: pide gh y jq y rechaza un valor no válido. Todas las
 # direcciones son de documentación.
 #
 # Uso: deploy/pruebas/actualizar.sh (desde cualquier sitio; necesita git,
-# python3, tar, file y sha256sum).
+# python3, tar, file, sha256sum y jq).
 
 set -eu
 
@@ -50,7 +57,7 @@ DEPLOY=$(cd "$(dirname "$0")/.." && pwd)
 ACT=$DEPLOY/freebsd/actualizar.sh
 OBJ=x86_64-unknown-freebsd
 
-for orden in git python3 sha256sum tar file; do
+for orden in git python3 sha256sum tar file jq; do
 	command -v "$orden" >/dev/null 2>&1 || {
 		echo "FALLO: falta $orden" >&2
 		exit 1
@@ -424,6 +431,44 @@ cat >"$F/ps" <<EOF
 case " \$* " in *" -p 4242"*) ;; *) exit 1 ;; esac
 [ -f "$T/en-marcha" ] || exit 1
 sed -n 1p "$T/en-marcha"
+EOF
+
+# fetch del host y gh: el GitHub de mentira (casos x).
+GH=$T/github
+mkdir -p "$GH"
+cat >"$F/fetch" <<EOF
+#!/bin/sh
+for u; do :; done
+printf '%s\n' "\$u" >>"$GH/fetch.log"
+case \$u in
+https://github.com/*) f="$GH/web/\${u#https://github.com/}" ;;
+https://api.github.com/*) f="$GH/api/\${u#https://api.github.com/}" ;;
+*) exit 1 ;;
+esac
+[ -f "\$f" ] || { echo "fetch: \$u: Not Found" >&2; exit 1; }
+cat "\$f"
+EOF
+cat >"$F/gh" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >>"$GH/gh.log"
+[ "\$1 \$2" = "attestation verify" ] || exit 2
+f=\$3
+shift 3
+b= r= ref= w=
+while [ \$# -gt 0 ]; do
+	case \$1 in
+	--bundle) b=\$2 ;;
+	--repo) r=\$2 ;;
+	--source-ref) ref=\$2 ;;
+	--signer-workflow) w=\$2 ;;
+	*) exit 2 ;;
+	esac
+	shift 2
+done
+d=\$(sha256sum <"\$f" | cut -c1-64)
+grep -qxF "{\"falsa\":\"\$d \$r \$ref \$w\"}" "\$b" && exit 0
+echo "Error: verification failed" >&2
+exit 1
 EOF
 
 # cargo de la jail de compilación: «compila» la versión de Cargo.toml con la
@@ -941,6 +986,145 @@ actualizar || fallo "no despliega con ESCUCHA=$ESCUCHA: $(cat "$T/salida")"
 grep -qxF 'http://[2001:db8::7]:9000/salud' "$T/fetch.log" || fallo "no pregunta /salud en $ESCUCHA: $(cat "$T/fetch.log")"
 v_antes=$(versiones)
 
+# --- (x) versiones de GitHub ------------------------------------------------------
+# fetch del host y gh de mentira (como en deploy/pruebas/precompiladas.sh):
+# fetch sirve $GH/web (github.com) y $GH/api (api.github.com); gh da por
+# buena una atestación {"falsa":"<sha256> <repo> <ref> <flujo>"} que case
+# con el paquete. jq es el de verdad.
+empieza "x: sin GITHUB_REPO no se mira GitHub"
+# Hasta aquí ninguna configuración tenía GITHUB_REPO.
+[ ! -e "$GH/fetch.log" ] && [ ! -e "$GH/gh.log" ] || fallo "sin GITHUB_REPO llama a fetch o gh en el host"
+
+RG=ejemplo/semillero
+# Publica en el GitHub de mentira la versión $1 como release.yml. $2:
+# variante del binario (binario); $3: buena, sha-malo u otra-etiqueta.
+publicar_github()
+{
+	_v=$1
+	_a=semillero-$_v-$OBJ
+	_rel=$GH/web/$RG/releases/download/v$_v
+	_b=$T/build-github/$_v
+	rm -rf "$_b" "$_rel" "$GH/api"
+	mkdir -p "$_b/$_a/site/pkg" "$_b/$_a/rc.d" "$_rel" "$GH/api/repos/$RG/attestations"
+	binario "$_v" "${2:-buena}" >"$_b/$_a/semillero"
+	printf 'js: abc\nwasm: abc\ncss: abc\n' >"$_b/$_a/site/hash.txt"
+	for e in js wasm css; do printf '%s %s\n' "$e" "$_v" >"$_b/$_a/site/pkg/semillero.abc.$e"; done
+	printf '%040d\n' 0 | tr 0 c >"$_b/$_a/COMMIT"
+	for f in LICENSE README.md README.en.md rc.d/semillero; do echo "$f" >"$_b/$_a/$f"; done
+	tar -C "$_b" --sort=name --owner=0 --group=0 --numeric-owner -czf "$_rel/$_a.tar.gz" "$_a"
+	_d=$(sha256sum <"$_rel/$_a.tar.gz" | cut -c1-64)
+	_s=$_d
+	if [ "${3:-}" = sha-malo ]; then _s=$(printf '%064d' 2); fi
+	printf '%s  %s\n%s  %s\n' "$_s" "$_a.tar.gz" "$(printf '%064d' 1)" "semillero-$_v-x86_64-unknown-linux-gnu.tar.gz" >"$_rel/SHA256SUMS"
+	_ref=refs/tags/v$_v
+	if [ "${3:-}" = otra-etiqueta ]; then _ref=refs/tags/v9.9.9; fi
+	printf '{"attestations":[{"bundle":{"falsa":"%s %s %s %s/.github/workflows/release.yml"}}]}\n' \
+		"$_d" "$RG" "$_ref" "$RG" >"$GH/api/repos/$RG/attestations/sha256:$_d"
+}
+nuevo_fetch()
+{
+	tail -n +$((m_fetch + 1)) "$GH/fetch.log" 2>/dev/null || true
+}
+marcar_fetch()
+{
+	m_fetch=$(lineas "$GH/fetch.log")
+}
+escribir_conf "" "GITHUB_REPO=$RG"
+
+empieza "x: versión de GitHub"
+publicar 1.9.0
+publicar_github 1.9.0
+marcar
+marcar_fetch
+actualizar || fallo "no despliega la versión de GitHub: $(cat "$T/salida")"
+[ "$(actual)" = releases/1.9.0 ] && [ "$(en_marcha)" = 1.9.0 ] || fallo "no despliega 1.9.0 de GitHub ($(actual))"
+[ "$(find "$REL/1.9.0" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort | tr '\n' ' ')" = "COMMIT semillero site " ] ||
+	fallo "instala de GitHub algo más que semillero, site/ y COMMIT"
+[ "$(stat -c %a "$REL/1.9.0/semillero" "$REL/1.9.0/COMMIT" | tr '\n' ' ')" = "755 644 " ] || fallo "permisos de lo de GitHub"
+nuevo log | grep -q "instalada la versión de GitHub de v1.9.0 ($RG" || fallo "el registro no dice que viene de GitHub: $(nuevo log)"
+[ "$(compilaciones_nuevas)" -eq 0 ] || fallo "compila teniendo la versión de GitHub"
+grep -q -- "--repo $RG --source-ref refs/tags/v1.9.0 --signer-workflow $RG/.github/workflows/release.yml" "$GH/gh.log" ||
+	fallo "gh no comprueba repositorio, etiqueta y flujo: $(cat "$GH/gh.log")"
+
+empieza "x: GitHub con sha256 malo"
+publicar 1.9.1
+publicar_github 1.9.1 buena sha-malo
+echo "v1.9.1 1" >"$ESTADO/precompilada"
+marcar
+actualizar || fallo "no compila aquí tras rechazar GitHub: $(cat "$T/salida")"
+nuevo log | grep -q 'ERROR: versión de GitHub de v1.9.1 rechazada: el sha256' || fallo "no dice por qué rechaza GitHub: $(nuevo log)"
+[ "$(compilaciones_nuevas)" -eq 1 ] || fallo "no compila aquí tras rechazar GitHub"
+grep -qax compilado-aqui "$REL/1.9.1/semillero" || fallo "despliega la versión de GitHub con sha256 malo"
+[ "$(actual)" = releases/1.9.1 ] || fallo "no despliega 1.9.1 compilada aquí"
+
+empieza "x: atestación que no cuadra"
+publicar 1.9.2
+publicar_github 1.9.2 buena otra-etiqueta
+marcar
+actualizar || fallo "falla mientras espera: $(cat "$T/salida")"
+sin_cambios releases/1.9.1 "$(versiones)"
+[ ! -e "$REL/1.9.2" ] || fallo "instala una versión cuya atestación no cuadra"
+nuevo log | grep -q 'ERROR: versión de GitHub de v1.9.2 rechazada: la atestación' || fallo "no dice que la atestación no cuadra: $(nuevo log)"
+nuevo log | grep -q 'esperando la versión precompilada de v1.9.2' || fallo "no sigue esperando al buzón: $(nuevo log)"
+[ "$(compilaciones_nuevas)" -eq 0 ] || fallo "compila mientras espera"
+[ ! -e "$ESTADO/intentos" ] || fallo "una atestación que no cuadra cuenta como fallo de la etiqueta"
+# Pasada la espera: compila aquí.
+echo "v1.9.2 1" >"$ESTADO/precompilada"
+marcar
+actualizar || fallo "no compila pasada la espera: $(cat "$T/salida")"
+grep -qax compilado-aqui "$REL/1.9.2/semillero" || fallo "no despliega lo compilado aquí tras la atestación mala"
+
+empieza "x: sin release en GitHub"
+publicar 1.9.3
+rm -rf "$GH/web/$RG/releases/download/v1.9.3"
+echo "v1.9.3 1" >"$ESTADO/precompilada"
+marcar
+actualizar || fallo "no compila sin release en GitHub: $(cat "$T/salida")"
+nuevo log | grep -q 'no se usa GitHub para v1.9.3: no se puede descargar' || fallo "no dice que no hay release: $(nuevo log)"
+nuevo log | grep -q 'ERROR' && fallo "una release que aún no está se da como error: $(nuevo log)"
+[ "$(compilaciones_nuevas)" -eq 1 ] && [ "$(actual)" = releases/1.9.3 ] || fallo "no compila ni despliega 1.9.3"
+
+empieza "x: el buzón va primero"
+publicar 1.9.4
+entregar 1.9.4
+publicar_github 1.9.4
+marcar
+marcar_fetch
+actualizar || fallo "no despliega del buzón: $(cat "$T/salida")"
+nuevo log | grep -q 'instalada la versión precompilada de v1.9.4' || fallo "no usa el buzón: $(nuevo log)"
+[ -z "$(nuevo_fetch)" ] || fallo "descarga de GitHub teniendo el buzón: $(nuevo_fetch)"
+[ "$(actual)" = releases/1.9.4 ] || fallo "no despliega 1.9.4"
+
+empieza "x: el 2.º intento no usa GitHub"
+publicar 1.9.5
+publicar_github 1.9.5 roto
+marcar
+if actualizar; then fallo "acepta una versión de GitHub que no arranca"; fi
+[ "$(cat "$ESTADO/intentos" 2>/dev/null | tr '\n' ' ')" = "v1.9.5 1 " ] || fallo "no cuenta el fallo de la versión de GitHub"
+echo "v1.9.5 1" >"$ESTADO/precompilada"
+marcar
+marcar_fetch
+actualizar || fallo "no compila en el 2.º intento: $(cat "$T/salida")"
+[ -z "$(nuevo_fetch)" ] || fallo "vuelve a GitHub en el 2.º intento: $(nuevo_fetch)"
+grep -qax compilado-aqui "$REL/1.9.5/semillero" || fallo "el 2.º intento no compila aquí"
+
+empieza "x: --comprobar con GITHUB_REPO"
+marcar
+actualizar --comprobar || fallo "--comprobar falla con GITHUB_REPO: $(cat "$T/salida")"
+grep -q "GitHub: $RG (gh y jq instalados)" "$T/salida" || fallo "--comprobar no dice la fuente de GitHub: $(cat "$T/salida")"
+[ -z "$(nuevo log)" ] || fallo "--comprobar escribe en el registro"
+
+empieza "x: GITHUB_REPO no válido"
+for mala in ejemplo 'ejemplo/semillero/x' '-ejemplo/semillero' 'ejemplo/semillero;id' 'ejemplo/..'; do
+	escribir_conf "" "GITHUB_REPO='$mala'"
+	marcar
+	if actualizar; then fallo "acepta GITHUB_REPO=«$mala»"; fi
+	[ -z "$(nuevo jexec)" ] || fallo "con GITHUB_REPO=«$mala» entra en alguna jail"
+	nuevo log | grep -q 'GITHUB_REPO tiene que ser' || fallo "no dice qué pasa con GITHUB_REPO=«$mala»: $(nuevo log)"
+done
+escribir_conf
+v_antes=$(versiones)
+
 # --- (l) install.sh en una carpeta -----------------------------------------
 empieza "l: install.sh"
 
@@ -974,7 +1158,7 @@ grep -q 'ERROR: faltan en /usr/local/etc/semillero-actualizar.conf: REPO_URL ESC
 [ "$(stat -c %a "$I/usr/local/etc/semillero-actualizar.conf" 2>&1)" = 600 ] || fallo "no escribe la plantilla con 600"
 for clave in REPO_URL= ESCUCHA= JAIL=semillero JAIL_RAIZ= JAIL_COMPILAR=semillero-build \
 	JAIL_COMPILAR_IP= REPO_IP= REPO_PUERTO= DNS_IP= RED_LAN= INTERFAZ_EXT= \
-	PRECOMPILADAS_ESPERA=20 TRABAJOS_COMPILACION= USUARIO_COMPILAR=smbuild; do
+	PRECOMPILADAS_ESPERA=20 TRABAJOS_COMPILACION= GITHUB_REPO= USUARIO_COMPILAR=smbuild; do
 	grep -qx "$clave" "$I/usr/local/etc/semillero-actualizar.conf" || fallo "la plantilla no tiene $clave"
 done
 [ ! -e "$I/usr/local/sbin" ] && [ ! -e "$I/usr/local/etc/cron.d" ] && [ ! -e "$I/var" ] ||
@@ -1078,6 +1262,32 @@ grep -qF 'from 192.0.2.30 to 192.0.2.1 port 53' "$T/salida" || fallo "sin REPO_I
 grep -qF 'block quick from 192.0.2.30 to { 192.0.2.0/24 198.51.100.0/24 }' "$T/salida" ||
 	fallo "sin REPO_IP no bloquea la red local"
 grep -q '@[A-Z_]*@' "$T/salida" && fallo "sin REPO_IP deja huecos de plantilla"
+
+# --- (y) install.sh con GITHUB_REPO ---------------------------------------------
+empieza "y: install.sh con GITHUB_REPO"
+I=$T/inst-github
+mkdir -p "$I/usr/local/jails/containers/semillero"
+conf_install "$I" nuevas 'GITHUB_REPO=ejemplo/semillero'
+if sh "$DEPLOY/freebsd/install.sh" --prefijo "$I" >"$T/salida" 2>&1; then
+	fallo "install.sh sale bien con GITHUB_REPO y sin gh ni jq"
+fi
+grep -q 'pkg install gh jq' "$T/salida" || fallo "no dice qué paquetes faltan: $(cat "$T/salida")"
+[ ! -e "$I/usr/local/sbin" ] || fallo "sin gh instala el actualizador"
+mkdir -p "$I/usr/local/bin"
+printf '#!/bin/sh\n' >"$I/usr/local/bin/gh"
+chmod 755 "$I/usr/local/bin/gh"
+sh "$DEPLOY/freebsd/install.sh" --prefijo "$I" >"$T/salida" 2>&1 && fallo "install.sh sale bien sin jq"
+grep -q 'pkg install jq' "$T/salida" || fallo "no dice que falta jq: $(cat "$T/salida")"
+cp "$I/usr/local/bin/gh" "$I/usr/local/bin/jq"
+if ! sh "$DEPLOY/freebsd/install.sh" --prefijo "$I" >"$T/salida" 2>&1; then
+	cat "$T/salida" >&2
+	fallo "install.sh falla con GITHUB_REPO, gh y jq"
+fi
+conf_install "$I" nuevas 'GITHUB_REPO=ejemplo'
+if sh "$DEPLOY/freebsd/install.sh" --prefijo "$I" >"$T/salida" 2>&1; then
+	fallo "install.sh acepta GITHUB_REPO=ejemplo"
+fi
+grep -q 'GITHUB_REPO tiene que ser' "$T/salida" || fallo "install.sh no dice qué pasa con GITHUB_REPO: $(cat "$T/salida")"
 
 if [ "$fallos" -ne 0 ]; then
 	echo "$fallos fallos en $casos casos" >&2
