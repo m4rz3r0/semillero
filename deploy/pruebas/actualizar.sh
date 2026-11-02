@@ -62,7 +62,7 @@ done
 }
 # El actualizador usa «set -o pipefail», que tiene el sh de FreeBSD pero no
 # el dash de Debian y Ubuntu: ahí se prueba con bash en modo POSIX.
-SH_ACT=sh
+SH_ACT='sh'
 if ! sh -c 'set -o pipefail' 2>/dev/null; then
 	command -v bash >/dev/null 2>&1 || {
 		echo "FALLO: este sh no tiene pipefail y falta bash" >&2

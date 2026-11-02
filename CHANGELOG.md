@@ -3,6 +3,11 @@
 Lo que cambia en cada versión publicada. Lo que viene después, en
 [ROADMAP.md](ROADMAP.md).
 
+## 0.3.2
+
+- La prueba del actualizador pasa shellcheck (aviso SC2209). El programa no
+  cambia.
+
 ## 0.3.1
 
 - Las pruebas del actualizador de FreeBSD pasan también en Debian y Ubuntu,
