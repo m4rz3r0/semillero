@@ -3,6 +3,17 @@
 Lo que cambia en cada versión publicada. Lo que viene después, en
 [ROADMAP.md](ROADMAP.md).
 
+## 0.4.1
+
+Al actualizar no hay que hacer nada.
+
+- Arreglado: desde la 0.3.0, sin `SEMILLERO_JELLYFIN_CLAVE` la clave de
+  Jellyfin se busca junto a la base de datos, y una instalación que venía de
+  la 0.2 (con la clave en `/usr/local/etc/semillero/jellyfin.clave`, la ruta
+  por defecto de entonces) no arrancaba. Si la clave no está junto a la base
+  de datos y sí en esa ruta, ahora se usa esa y el registro avisa de que
+  conviene moverla o poner `SEMILLERO_JELLYFIN_CLAVE`.
+
 ## 0.4.0
 
 Al actualizar no hay que hacer nada: la base de datos, los presets y las

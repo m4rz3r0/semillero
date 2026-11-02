@@ -15,7 +15,7 @@
 //! | `SEMILLERO_PROXY` | IP del proxy inverso: solo de ella se cree la IP del cliente en `X-Forwarded-For` | (ninguno: vale la IP de la conexión) |
 //! | `SEMILLERO_LOG` | nivel de registro (sintaxis de `EnvFilter`) | `info` |
 //! | `SEMILLERO_JELLYFIN` | dirección de Jellyfin; sin ella no se avisa a ninguna mediateca | (sin Jellyfin) |
-//! | `SEMILLERO_JELLYFIN_CLAVE` | fichero con la clave de la API de Jellyfin | `jellyfin.clave` junto a la base de datos |
+//! | `SEMILLERO_JELLYFIN_CLAVE` | fichero con la clave de la API de Jellyfin | `jellyfin.clave` junto a la base de datos (o, si no existe, la ruta de la 0.2 `/usr/local/etc/semillero/jellyfin.clave`) |
 //! | `LEPTOS_SITE_ROOT` | directorio con la web (WASM, JS y CSS) | `site` junto al ejecutable |
 //!
 //! qBittorrent se usa de dos maneras:
@@ -64,7 +64,13 @@ pub struct Config {
 pub struct ConfJellyfin {
     pub url: String,
     pub clave: PathBuf,
+    /// Dónde estaba la clave por defecto hasta la 0.2; se usa si `clave` no
+    /// existe. Solo cuando `SEMILLERO_JELLYFIN_CLAVE` no dice nada.
+    pub antigua: Option<PathBuf>,
 }
+
+/// Ruta por defecto de la clave de Jellyfin en la 0.2.
+const CLAVE_JELLYFIN_0_2: &str = "/usr/local/etc/semillero/jellyfin.clave";
 
 /// Usuario de qBittorrent y el fichero con su contraseña (modo con
 /// contraseña). Como la clave de Jellyfin, la contraseña no va en una
@@ -139,11 +145,13 @@ impl Config {
         let db: PathBuf = var("SEMILLERO_DB")
             .unwrap_or_else(|| "semillero.db".into())
             .into();
-        let jellyfin = var("SEMILLERO_JELLYFIN").map(|url| ConfJellyfin {
-            url: url.trim_end_matches('/').to_owned(),
-            clave: var("SEMILLERO_JELLYFIN_CLAVE")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| junto_a(&db, "jellyfin.clave")),
+        let jellyfin = var("SEMILLERO_JELLYFIN").map(|url| {
+            let clave = var("SEMILLERO_JELLYFIN_CLAVE").map(PathBuf::from);
+            ConfJellyfin {
+                url: url.trim_end_matches('/').to_owned(),
+                antigua: clave.is_none().then(|| CLAVE_JELLYFIN_0_2.into()),
+                clave: clave.unwrap_or_else(|| junto_a(&db, "jellyfin.clave")),
+            }
         });
         Ok(Self {
             escucha,

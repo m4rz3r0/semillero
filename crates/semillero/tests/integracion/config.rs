@@ -137,6 +137,52 @@ fn jellyfin_con_la_clave_en_un_fichero() {
 }
 
 #[test]
+fn sin_ruta_de_la_clave_de_jellyfin_vale_tambien_la_de_la_0_2() {
+    let c = con(&[("SEMILLERO_JELLYFIN", "http://192.0.2.9:8096")]).unwrap();
+    assert_eq!(
+        c.jellyfin.unwrap().antigua.as_deref(),
+        Some(std::path::Path::new(
+            "/usr/local/etc/semillero/jellyfin.clave"
+        ))
+    );
+    // Con la ruta puesta, solo vale esa.
+    let c = con(&[
+        ("SEMILLERO_JELLYFIN", "http://192.0.2.9:8096"),
+        ("SEMILLERO_JELLYFIN_CLAVE", "/tmp/k"),
+    ])
+    .unwrap();
+    assert_eq!(c.jellyfin.unwrap().antigua, None);
+}
+
+#[test]
+fn la_clave_de_jellyfin_de_la_0_2_se_usa_si_no_hay_otra() {
+    use semillero::config::ConfJellyfin;
+    use semillero::mediateca::desde_config;
+    let dir = tempfile::tempdir().unwrap();
+    let nueva = dir.path().join("jellyfin.clave");
+    let antigua = dir.path().join("antigua.clave");
+    let j = ConfJellyfin {
+        url: "http://127.0.0.1:1".into(),
+        clave: nueva.clone(),
+        antigua: Some(antigua.clone()),
+    };
+    // Ninguna de las dos: el error dice la ruta nueva.
+    let e = desde_config(Some(&j)).err().unwrap();
+    assert!(e.contains(nueva.to_str().unwrap()), "{e}");
+    // Solo la antigua: se usa.
+    std::fs::write(&antigua, "abc123\n").unwrap();
+    assert!(desde_config(Some(&j)).is_ok());
+    // Las dos: manda la nueva (vacía, así que falla).
+    std::fs::write(&nueva, "\n").unwrap();
+    let e = desde_config(Some(&j)).err().unwrap();
+    assert!(e.contains("vacío"), "{e}");
+    // Sin ruta antigua, la que falta no se sustituye.
+    std::fs::remove_file(&nueva).unwrap();
+    let sin = ConfJellyfin { antigua: None, ..j };
+    assert!(desde_config(Some(&sin)).is_err());
+}
+
+#[test]
 fn la_clave_de_jellyfin_se_lee_del_fichero() {
     use semillero::mediateca::desde_config;
     assert!(desde_config(None).is_ok());

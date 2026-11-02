@@ -131,7 +131,7 @@ el entorno, manda sobre la del fichero.
 | `SEMILLERO_PROXY` | IP del proxy inverso; solo de ella se cree `X-Forwarded-For` | ninguna: vale la IP de la conexión |
 | `SEMILLERO_ESTADO` | fichero de estado de la VPN y del puerto | ninguno: no se vigilan |
 | `SEMILLERO_JELLYFIN` | dirección de Jellyfin | ninguna: sin Jellyfin |
-| `SEMILLERO_JELLYFIN_CLAVE` | fichero con la clave de la API de Jellyfin | `jellyfin.clave` junto a la base de datos |
+| `SEMILLERO_JELLYFIN_CLAVE` | fichero con la clave de la API de Jellyfin | `jellyfin.clave` junto a la base de datos (si no existe y sí `/usr/local/etc/semillero/jellyfin.clave`, la ruta de la 0.2, se usa esa) |
 | `SEMILLERO_LOG` | nivel de registro (`error`, `warn`, `info`, `debug`) | `info` |
 | `LEPTOS_SITE_ROOT` | carpeta de la web (WASM, JS y CSS) | `site` junto al ejecutable |
 

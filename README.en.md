@@ -137,7 +137,7 @@ wins over the one in the file.
 | `SEMILLERO_PROXY` | reverse proxy IP; `X-Forwarded-For` is trusted only from it | none: the connection IP counts |
 | `SEMILLERO_ESTADO` | VPN and port status file | none: not watched |
 | `SEMILLERO_JELLYFIN` | Jellyfin address | none: no Jellyfin |
-| `SEMILLERO_JELLYFIN_CLAVE` | file with the Jellyfin API key | `jellyfin.clave` next to the database |
+| `SEMILLERO_JELLYFIN_CLAVE` | file with the Jellyfin API key | `jellyfin.clave` next to the database (if it does not exist and `/usr/local/etc/semillero/jellyfin.clave`, the 0.2 path, does, that one) |
 | `SEMILLERO_LOG` | log level (`error`, `warn`, `info`, `debug`) | `info` |
 | `LEPTOS_SITE_ROOT` | web folder (WASM, JS and CSS) | `site` next to the executable |
 

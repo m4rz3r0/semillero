@@ -36,12 +36,24 @@ impl Mediateca for Jellyfin {
 }
 
 /// La mediateca según la configuración: Jellyfin con la clave leída de su
-/// fichero, o ninguna. El error nunca lleva la clave.
+/// fichero, o ninguna. Si el fichero no existe y la ruta de la 0.2 sí, se
+/// usa esa. El error nunca lleva la clave.
 pub fn desde_config(j: Option<&ConfJellyfin>) -> Result<Compartida, String> {
     let Some(j) = j else {
         return Ok(Compartida::default());
     };
-    let clave = crate::config::leer_secreto(&j.clave, "la clave de Jellyfin")?;
+    let ruta = match &j.antigua {
+        Some(antigua) if !j.clave.exists() && antigua.exists() => {
+            tracing::warn!(
+                "la clave de Jellyfin se lee de {}, donde estaba en la 0.2; muévela a {} o pon SEMILLERO_JELLYFIN_CLAVE",
+                antigua.display(),
+                j.clave.display()
+            );
+            antigua
+        }
+        _ => &j.clave,
+    };
+    let clave = crate::config::leer_secreto(ruta, "la clave de Jellyfin")?;
     Ok(Compartida(Arc::new(Jellyfin::new(&j.url, &clave))))
 }
 
