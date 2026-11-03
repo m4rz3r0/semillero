@@ -88,9 +88,12 @@ ln -sfh "releases/$V" "$J/usr/local/semillero/current"
 
 El paquete trae el arranque en `rc.d/semillero`: lo arranca con
 `daemon(8)` como el usuario `semillero`, lee la configuración de
-`semillero_env_file` y lo reinicia si se cae.
+`semillero_env_file` y lo reinicia si se cae. En una jail recién creada
+aún no existe `/usr/local/etc/rc.d` (la crea `pkg` al instalar el primer
+paquete):
 
 ```sh
+mkdir -p "$J/usr/local/etc/rc.d"
 install -m 555 "$J/usr/local/semillero/releases/$V/rc.d/semillero" \
   "$J/usr/local/etc/rc.d/semillero"
 ```
@@ -173,19 +176,23 @@ Para volver atrás, apunta `current` a la versión anterior y reinicia.
 ## Actualizar solo, con el actualizador
 
 `deploy/freebsd/` instala en el host un cron que cada 15 minutos busca la
-última etiqueta `vX.Y.Z`, toma el paquete de FreeBSD de su release de
-GitHub (comprobando `SHA256SUMS` y la atestación, como arriba) o la compila
-en una jail de compilación sin privilegios, para el servicio, copia la base de datos, cambia `current` y
+última etiqueta `vX.Y.Z` (con `git ls-remote`, sin clonar nada), toma el
+paquete de FreeBSD de su release de GitHub (comprobando `SHA256SUMS` y la
+atestación, como arriba) o de la release de Forgejo que publica un runner
+de Forgejo Actions en un PC (con un token de solo lectura), para el servicio, copia la base de datos, cambia `current` y
 arranca. Si `/salud` no responde con la versión nueva en 60 s, vuelve a la
-anterior. Usa la misma jail, el mismo usuario y el mismo rc.d de esta guía.
+anterior. El servidor no compila nunca: mientras no haya un paquete
+comprobado, espera. Usa la misma jail, el mismo usuario y el mismo rc.d de
+esta guía.
 
 Los detalles de cada paso están en [deploy/README.md](../../deploy/README.md).
 En resumen:
 
-1. Una copia del repositorio en el host:
+1. Una copia del repositorio en el host (y `git`, que el actualizador usa
+   para ver las etiquetas):
 
    ```sh
-   pkg install git
+   pkg install git gh jq
    git clone https://github.com/m4rz3r0/semillero.git /root/semillero
    cd /root/semillero && git checkout vX.Y.Z
    ```
@@ -207,29 +214,20 @@ En resumen:
    ```sh
    REPO_URL=https://github.com/m4rz3r0/semillero.git
    ESCUCHA=192.0.2.11:8090
-   JAIL_COMPILAR_IP=192.0.2.30
-   DNS_IP=192.0.2.1
-   RED_LAN='{ 192.0.2.0/24 }'
-   INTERFAZ_EXT=em0
    GITHUB_REPO=m4rz3r0/semillero
-   PRECOMPILADAS_ESPERA=30
    ```
 
-   `REPO_IP` se queda vacía: solo sirve para dejar pasar a la jail de
-   compilación a un servidor git de tu red, y con el repositorio en
-   Internet no hace falta. `GITHUB_REPO`: instala el paquete de la release
-   de GitHub si su atestación es de esa etiqueta y de `release.yml`; necesita
-   `pkg install gh jq` en el host (sin sesión de `gh`). Sin PC de
-   compilación, `PRECOMPILADAS_ESPERA=30` es lo que espera a la release (que
-   sale unos minutos después de la etiqueta) antes de compilar aquí; con
-   `GITHUB_REPO` vacía, déjala vacía también y compila en cuanto ve la
-   etiqueta. Más en
-   [Versiones de GitHub](../../deploy/README.md#versiones-de-github-opcional).
-4. Repite `install.sh` y sigue lo que escribe: la jail de compilación, las
-   reglas de pf y el montaje en solo lectura (pasos 2, 3 y 5 de
-   [Preparar el host](../../deploy/README.md#preparar-el-host-una-vez)).
-   Con un repositorio público no hace falta dar de alta la clave de
-   despliegue ni el buzón.
+   `GITHUB_REPO`: instala el paquete de la release de GitHub si su
+   atestación es de esa etiqueta y de `release.yml`; necesita
+   `pkg install gh jq` en el host (sin sesión de `gh`). La release sale unos
+   minutos después de la etiqueta: hasta entonces, el actualizador espera.
+   Con `REPO_URL` por `https` no hace falta clave de despliegue. Más en
+   [Versiones de GitHub](../../deploy/README.md#versiones-de-github).
+4. Repite `install.sh` y sigue lo que escribe: el montaje en solo lectura
+   (paso 3 de
+   [Preparar el host](../../deploy/README.md#preparar-el-host-una-vez)). Con
+   un repositorio público y sin runner en el PC no hace falta ni la clave
+   de despliegue ni el token de Forgejo.
 5. Arranca el servicio y prueba el actualizador:
 
    ```sh

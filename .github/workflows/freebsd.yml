@@ -1,0 +1,114 @@
+# La guía de FreeBSD (docs/instalar/freebsd.md) en una máquina FreeBSD de
+# verdad, en cada push y pull request: el paquete de FreeBSD se hace como en
+# release.yml (la web con cargo-leptos, el binario con cross y
+# packaging/empaquetar.sh) y, en una máquina virtual de FreeBSD dentro del
+# runner de Ubuntu (vmactions/freebsd-vm), tools/ci/freebsd-guia.sh sigue la
+# guía: la jail, el usuario, el rc.d del paquete, «semillero configurar»,
+# sysrc y «service semillero start»; luego, que /salud contesta en 127.0.0.1
+# con la versión y que «service semillero status/restart/stop» funcionan.
+# No hace falta qBittorrent: /salud no le pregunta. En FreeBSD 14 y 15, las
+# dos que dice la guía.
+#
+# Las acciones de terceros van fijadas por commit (con su versión al lado);
+# para subirlas, git ls-remote https://github.com/<dueño>/<acción> refs/tags/<versión>
+# (con ^{} si la etiqueta es anotada).
+
+name: freebsd
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: freebsd-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  LEPTOS_OUTPUT_NAME: semillero
+
+jobs:
+  paquete:
+    name: Paquete de FreeBSD (como release.yml)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      # cross solo pasa al contenedor las variables que se le dicen.
+      CROSS_BUILD_ENV_PASSTHROUGH: LEPTOS_OUTPUT_NAME
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Sintaxis de tools/ci/freebsd-*
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends shellcheck
+          for f in tools/ci/freebsd-*.sh; do sh -n "$f"; done
+          shellcheck -x tools/ci/freebsd-*.sh
+      - name: Rust de rust-toolchain.toml
+        run: |
+          rustup toolchain install
+          rustup target add x86_64-unknown-freebsd
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: cross@0.2.5
+      # Como en release.yml: la web no depende del sistema y sale de Linux,
+      # con su versión de cargo-leptos.
+      - name: Web (cargo-leptos)
+        run: |
+          v=$(sed -n 's/^  CARGO_LEPTOS_VERSION: *//p' .github/workflows/release.yml)
+          test -n "$v"
+          cargo install --locked cargo-leptos --version "$v"
+          cargo leptos build --release --precompress
+          test -f target/site/hash.txt
+      - name: Binario (cross)
+        run: |
+          cross build --release --locked --target x86_64-unknown-freebsd \
+            -p semillero --bin semillero --no-default-features --features ssr
+          b=target/x86_64-unknown-freebsd/release/semillero
+          file -b "$b" | grep -q 'FreeBSD' || { file "$b"; exit 1; }
+          mkdir -p salida
+          cp "$b" salida/semillero
+      - name: Empaquetar (packaging/empaquetar.sh)
+        run: |
+          export COMMIT=$GITHUB_SHA
+          v=$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/semillero/Cargo.toml | head -n 1)
+          sh packaging/empaquetar.sh x86_64-unknown-freebsd "$v" salida/semillero target/site dist
+          (cd dist && LC_ALL=C sha256sum -- semillero-* >SHA256SUMS && cat SHA256SUMS)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: paquete-freebsd
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  guia:
+    name: FreeBSD ${{ matrix.version }} (guía, rc.d y /salud)
+    needs: paquete
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["14", "15"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: paquete-freebsd
+          path: paquete
+      # La última versión de cada rama; la copia del repositorio (con el
+      # paquete) entra en la máquina con rsync y no vuelve.
+      - name: La guía en FreeBSD ${{ matrix.version }}
+        uses: vmactions/freebsd-vm@c46abacb49f09938ca4e1702d15d836285d694cc # v1.5.9
+        with:
+          release: ${{ matrix.version }}
+          copyback: false
+          run: sh tools/ci/freebsd-guia.sh paquete

@@ -240,13 +240,18 @@ fijada en `rust-toolchain.toml`):
 - Formas de instalarlo: [docs/instalar/](instalar/qbittorrent.md).
 - En FreeBSD hay además un actualizador (`deploy/freebsd/actualizar.sh`), un
   cron de root cada 15 minutos en el host:
-  1. trae las etiquetas en una jail de compilación sin privilegios y se queda
-     con la `vX.Y.Z` más alta;
-  2. espera un rato a que un PC de compilación la deje en un buzón del
-     servidor (opcional, `deploy/cross/`) y la comprueba: sha256, ficheros
-     normales, el commit de la etiqueta, ejecutable de FreeBSD;
-  3. si no llega o no cuadra, la compila en la jail de compilación, una sola
-     compilación a la vez en el host;
+  1. lee las etiquetas con `git ls-remote` desde el host (sin clonar ni
+     ejecutar nada del repositorio; por ssh, con una clave de despliegue de
+     solo lectura y la clave del servidor git fijada) y se queda con la
+     `vX.Y.Z` más alta y su commit;
+  2. la toma de la release de Forgejo de la etiqueta, que publica un runner
+     de Forgejo Actions en un PC (`.forgejo/workflows/freebsd.yml` y
+     `deploy/cross/`), con un token de solo lectura que va a curl por la
+     entrada estándar, comprobando sha256, ficheros normales, el commit de
+     la etiqueta y que sea un ejecutable de FreeBSD; o, si no, de la release
+     de GitHub, con su atestación de procedencia;
+  3. el servidor no compila nunca: si ninguna está o cuadra, espera y lo
+     vuelve a mirar en cada pasada, sin contarlo como fallo;
   4. la deja en `/usr/local/semillero/releases/X.Y.Z` en el host, montado en
      solo lectura (nullfs) en la jail del servicio;
   5. para el servicio, copia la base de datos, cambia `current` de golpe y

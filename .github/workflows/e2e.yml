@@ -1,0 +1,68 @@
+# De punta a punta con un qBittorrent de verdad (la imagen oficial
+# qbittorrent-nox en un contenedor, no el simulador): las pruebas `real` de
+# crates/semillero/tests/integracion/real.rs (entrar, clasificar, avisar,
+# cancelar un aviso y borrar en modo real) contra cada versión de la
+# matriz. Todo en 127.0.0.1.
+#
+# Las acciones de terceros van fijadas por commit (con su versión al lado);
+# para subirlas, git ls-remote https://github.com/<dueño>/<acción> refs/tags/<versión>
+# (con ^{} si la etiqueta es anotada). Las imágenes, por su digest (con la
+# etiqueta al lado); para subirlas, skopeo inspect --format '{{.Digest}}'
+# docker://docker.io/qbittorrentofficial/qbittorrent-nox:<etiqueta>, y la
+# tabla de versiones de README.md y README.en.md con ellas.
+
+name: e2e
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  qbittorrent:
+    name: qBittorrent ${{ matrix.version }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: "5.1"
+            imagen: docker.io/qbittorrentofficial/qbittorrent-nox@sha256:85fe2690f418dabffc4907276b3cdffcb7880c7114157b32f932d3b97bac45af # 5.1.4-2
+          - version: "5.3"
+            imagen: docker.io/qbittorrentofficial/qbittorrent-nox@sha256:43b2d352cf76330a7ca34c7320b9b74227d6f31e662e0e123d0457206b09a7ea # 5.3.0-2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust de rust-toolchain.toml
+        run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Compilar las pruebas
+        run: cargo test -p semillero --locked --features ssr --test integracion --no-run
+      - name: Arrancar qBittorrent
+        env:
+          IMAGEN: ${{ matrix.imagen }}
+        run: sh tools/e2e/qbittorrent.sh arrancar "$IMAGEN" "$RUNNER_TEMP/qbt" >>"$GITHUB_ENV"
+      - name: Pruebas real
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test -p semillero --locked --features ssr --test integracion real:: \
+            -- --nocapture 2>&1 | tee "$RUNNER_TEMP/salida"
+          # Que no se haya saltado ninguna: sin las variables pasarían igual.
+          if grep -q saltada "$RUNNER_TEMP/salida"; then exit 1; fi
+          grep -q 'test result: ok\. 2 passed' "$RUNNER_TEMP/salida"
+      - name: Registro de qBittorrent y parar
+        if: always()
+        run: sh tools/e2e/qbittorrent.sh parar

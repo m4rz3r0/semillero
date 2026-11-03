@@ -1,5 +1,4 @@
 #!/bin/sh
-# shellcheck disable=SC2016 # los guiones de en_git y en_compilar se expanden en la jail
 #
 # Actualizador de semillero. Corre EN EL HOST (FreeBSD) como root; se instala
 # como /usr/local/sbin/semillero-actualizar y lo lanza cron cada 15 minutos
@@ -7,54 +6,58 @@
 #
 #   semillero-actualizar              despliega la última etiqueta vX.Y.Z
 #   semillero-actualizar --comprobar  solo dice qué haría; no cambia nada
-#   semillero-actualizar --ref REF    compila aquí y despliega REF (rama o
-#                                     commit), a mano; la siguiente pasada
-#                                     del cron vuelve a la última etiqueta
+#
+# El servidor nunca compila: solo instala versiones ya compiladas (la
+# release de Forgejo que publica el runner del PC, o la de GitHub con su
+# atestación). Si no hay ninguna, espera.
 #
 # Pasos:
-# 1. Trae las etiquetas del repositorio (REPO_URL) en la jail de compilación
-#    (JAIL_COMPILAR), como el usuario sin privilegios USUARIO_COMPILAR
-#    (smbuild) en su clon /home/<usuario>/semillero, con
-#    traer_ultima_etiqueta (deploy/lib/git.sh: nunca hace merge). Se queda
-#    con la vX.Y.Z más alta (sort -V). Si es la desplegada o una que ya
-#    falló dos veces seguidas (fichero «fallida»), termina sin decir nada.
-#    La versión de crates/semillero/Cargo.toml en esa etiqueta tiene que ser
-#    X.Y.Z (es la que dice /salud).
-# 2. Si es nueva, mira el buzón (/var/db/semillero-buzon/entrada/X.Y.Z, lo
-#    que deja el PC de compilación con deploy/cross/): espera hasta
-#    PRECOMPILADAS_ESPERA minutos desde que vio la etiqueta («esperando la
-#    versión precompilada»). Cuando llega (con SHA256SUMS, que el PC sube el
-#    último), la copia a una carpeta propia y la comprueba antes de
-#    instalarla (deploy/lib/precompiladas.sh): sha256, solo ficheros y
-#    carpetas normales, una sola carpeta con semillero, site/ y COMMIT,
-#    COMMIT igual al commit de la etiqueta y semillero un ejecutable de
-#    FreeBSD x86-64. La deja en /usr/local/semillero/releases/X.Y.Z (root;
-#    carpetas 755, ficheros 644, el binario 755). Esa carpeta del host se
-#    monta (nullfs, solo lectura) en la jail del servicio (JAIL) en
-#    /usr/local/semillero/releases.
-# 2b. Si se configura GITHUB_REPO (propietario/repositorio de GitHub) y el
-#    buzón no la tiene o no cuadra, la trae de la release vX.Y.Z de ese
-#    repositorio (preparar_github, deploy/lib/precompiladas.sh): el paquete
-#    de FreeBSD y SHA256SUMS por https con fetch, su atestación de la API de
-#    GitHub sin token y «gh attestation verify --bundle», que tiene que ser
-#    de GITHUB_REPO, de refs/tags/vX.Y.Z y firmada por
-#    .github/workflows/release.yml. Después, las mismas comprobaciones que el
-#    buzón salvo el commit (el del repositorio público es otro: lo ata a la
-#    etiqueta la atestación), y la web completa. Se prueba en cada pasada
-#    mientras se espera al buzón (la release sale unos minutos después de la
-#    etiqueta) y una vez más antes de compilar; no en el segundo intento de
-#    una etiqueta que ya falló. Si no está o no cuadra, lo dice en una línea
-#    y sigue como sin GITHUB_REPO. Necesita gh y jq (pkg install gh jq).
-# 3. Si no llega a tiempo o no cuadra, compila aquí, en la jail de
-#    compilación: cargo leptos build --release --precompress, con prioridad
-#    baja, una hora como mucho y TRABAJOS_COMPILACION trabajos de cargo a la
-#    vez (salida en /var/log/semillero-build.log). Solo una compilación a la
-#    vez en el host: se toma el cerrojo neutro /var/run/compilar.lock (no es
-#    de ningún proyecto; otros del host pueden usar el mismo); si está cogido,
-#    lo dice y lo deja para la siguiente pasada, sin contarlo como fallo. El
-#    binario y la web salen de la jail como un tar que se genera DENTRO de
-#    ella: este guion, que corre como root, nunca abre rutas de la jail de
-#    compilación, que controla el código que se compila.
+# 1. Pregunta las etiquetas al repositorio (REPO_URL) con
+#    «git ls-remote --tags» desde el host: sin clon, sin traer nada y sin
+#    ejecutar nada del repositorio. Por ssh, con la clave de despliegue
+#    CLAVE_DESPLIEGUE (de solo lectura en el servidor git) y la clave del
+#    servidor git fijada en HOSTS_CONOCIDOS (StrictHostKeyChecking=yes,
+#    BatchMode=yes, sin la configuración de ssh de root). Se queda con la
+#    vX.Y.Z más alta (sort -V) y su commit (ultima_etiqueta_ls_remote,
+#    deploy/lib/git.sh: el de la línea «^{}» si es anotada). Si es la
+#    desplegada o una que ya falló dos veces seguidas (fichero «fallida»),
+#    termina sin decir nada. La versión de Cargo.toml no se mira (haría
+#    falta sacar el repositorio): si no es X.Y.Z, /salud lo dice al
+#    desplegar (paso 4) y se vuelve atrás.
+# 2. Si es nueva y se configuran FORGEJO_URL y FORGEJO_REPO, la trae de la
+#    release vX.Y.Z de Forgejo (preparar_forgejo, deploy/lib/precompiladas.sh),
+#    la que publica el runner de Forgejo Actions del PC
+#    (.forgejo/workflows/freebsd.yml): pregunta por la release a la API
+#    ($FORGEJO_URL/api/v1/repos/$FORGEJO_REPO/releases/tags/vX.Y.Z; un 404
+#    es que aún no está) y descarga SHA256SUMS y el paquete de
+#    $FORGEJO_URL/$FORGEJO_REPO/releases/download/vX.Y.Z/, con los nombres de
+#    siempre, con curl y el token de lectura de FORGEJO_TOKEN_FICHERO por la
+#    entrada estándar (nunca en los argumentos ni en la URL). Ese fichero
+#    tiene que ser de root y que nadie más pueda leerlo; si no, Forgejo no
+#    se usa (y el token no sale de ahí). Lo comprueba antes de instalarla:
+#    sha256, solo ficheros y carpetas normales, una sola carpeta con
+#    semillero, site/ y COMMIT, COMMIT igual al commit de la etiqueta y
+#    semillero un ejecutable de FreeBSD x86-64. La deja en
+#    /usr/local/semillero/releases/X.Y.Z (root; carpetas 755, ficheros 644,
+#    el binario 755). Esa carpeta del host se monta (nullfs, solo lectura) en
+#    la jail del servicio (JAIL) en /usr/local/semillero/releases. Necesita
+#    curl (pkg install curl).
+# 3. Si no, y se configura GITHUB_REPO (propietario/repositorio de GitHub),
+#    la trae de la release vX.Y.Z de ese repositorio (preparar_github,
+#    deploy/lib/precompiladas.sh): el paquete de FreeBSD y SHA256SUMS por
+#    https con fetch, su atestación de la API de GitHub sin token y
+#    «gh attestation verify --bundle», que tiene que ser de GITHUB_REPO, de
+#    refs/tags/vX.Y.Z y firmada por .github/workflows/release.yml. Después,
+#    las mismas comprobaciones que la de Forgejo salvo el commit (el del
+#    repositorio público es otro: lo ata a la etiqueta la atestación), y la
+#    web completa. Necesita gh y jq (pkg install gh jq).
+#    Si ninguna de las dos está (o no cuadra), apunta una sola vez por
+#    etiqueta «esperando la versión precompilada de X.Y.Z» y sale; lo vuelve
+#    a probar en cada pasada, sin límite de tiempo y sin contarlo como
+#    fallo. Un rechazo (sha256, paquete o atestación que no cuadran) es un
+#    ERROR en el registro, una vez por etiqueta, fuente y motivo, y tampoco
+#    cuenta como fallo. Forgejo sin configurar o sin token que se pueda usar
+#    se dice una vez (hasta que cambie).
 # 4. Para el servicio, copia la base de datos dentro de la jail JAIL como
 #    el usuario semillero (/var/db/semillero/antes-de-actualizar), cambia de
 #    golpe el enlace «current» de la jail (ln -sfh + mv -fh) y arranca. Espera
@@ -64,16 +67,19 @@
 #    el binario de releases/X.Y.Z.
 # 5. Si no: para, deja la base de datos como estaba, vuelve a la versión
 #    anterior (o quita «current» si no había) y arranca; borra la versión
-#    fallida. Tras 2 fallos seguidos de la misma etiqueta (también una
-#    compilación que falla o una versión de Cargo.toml que no cuadra), la
-#    apunta en /var/db/semillero-actualizar/fallida y deja de intentarlo
-#    hasta que haya otra.
+#    fallida. Tras 2 fallos seguidos de la misma etiqueta, la apunta en
+#    /var/db/semillero-actualizar/fallida y deja de intentarlo hasta que haya
+#    otra.
 # Se conservan las 3 versiones más recientes; nunca se borra la desplegada.
 #
 # Configuración: /usr/local/etc/semillero-actualizar.conf (root, 600; la
 # escribe deploy/freebsd/install.sh). Solo se lee si es de root y nadie más
 # puede escribirla. REPO_URL y ESCUCHA no tienen valor por defecto: si faltan,
-# no se hace nada y se dice cuál falta. Las funciones de deploy/lib/ van en
+# no se hace nada y se dice cuál falta. Con REPO_URL por ssh, la clave de
+# despliegue y el known_hosts tienen que ser de root y que nadie más pueda
+# escribirlos (y la clave, ni leerla). Las claves de la configuración de
+# antes (JAIL_COMPILAR, PRECOMPILADAS_ESPERA, TRABAJOS_COMPILACION,
+# USUARIO_BUZON…) ya no se usan. Las funciones de deploy/lib/ van en
 # /usr/local/libexec/semillero-actualizar.
 #
 # Registro: /var/log/semillero-update.log (lo rota newsyslog).
@@ -101,42 +107,40 @@ LIBEXEC=/usr/local/libexec/semillero-actualizar
 # Valores por defecto; los de la instalación vienen de $CONF. Los vacíos sin
 # comentario son obligatorios.
 REPO_URL=
+# Clave de despliegue (de solo lectura) y known_hosts con la clave del
+# servidor git, en el host; solo se usan con REPO_URL por ssh.
+CLAVE_DESPLIEGUE=/usr/local/etc/semillero-actualizar/id_ed25519
+HOSTS_CONOCIDOS=/usr/local/etc/semillero-actualizar/known_hosts
 JAIL=semillero
 # Vacía: /usr/local/jails/containers/$JAIL.
 JAIL_RAIZ=
-JAIL_COMPILAR=semillero-build
-# Minutos de espera a la versión precompilada; vacía, no se mira el buzón.
-PRECOMPILADAS_ESPERA=20
+# Forgejo (URL, sin barra al final) y su repositorio (propietario/nombre)
+# de cuyas releases traer la versión que publica el runner del PC; con
+# cualquiera de las dos vacía, no se mira Forgejo. El token de lectura, en
+# un fichero de root que nadie más pueda leer.
+FORGEJO_URL=
+FORGEJO_REPO=
+FORGEJO_TOKEN_FICHERO=/usr/local/etc/semillero-actualizar/forgejo-token
 # Repositorio de GitHub (propietario/repositorio) del que traer la versión
 # publicada, con su atestación; vacío, no se mira GitHub.
 GITHUB_REPO=
-# Trabajos de cargo a la vez; vacía, los que cargo decida (uno por núcleo).
-TRABAJOS_COMPILACION=
 # Dirección:puerto de escucha de semillero en la jail (la de su rc.d), p. ej.
 # 192.0.2.10:8090 o [2001:db8::10]:8090.
 ESCUCHA=
 
 SERVICIO=semillero
 USUARIO=semillero
-USUARIO_COMPILAR=smbuild
-# git de la jail por ruta absoluta en todo lo que el host usa:
-# ~$USUARIO_COMPILAR/.cargo/bin (lo primero del PATH de la compilación) lo puede
-# escribir cualquier build.rs.
-GIT=/usr/local/bin/git
 RELEASES=$RAIZ/usr/local/semillero/releases
 # Las mismas versiones vistas desde dentro de la jail (montaje nullfs).
 RELEASES_JAIL=/usr/local/semillero/releases
 DB_DIR=/var/db/semillero
 DB_COPIA=$DB_DIR/antes-de-actualizar
 ESTADO=$RAIZ/var/db/semillero-actualizar
-BUZON=$RAIZ/var/db/semillero-buzon/entrada
 LOG=$RAIZ/var/log/semillero-update.log
-LOG_COMPILACION=$RAIZ/var/log/semillero-build.log
 CERROJO=$RAIZ/var/run/semillero-actualizar.lock
-# Cerrojo neutro del host: una sola compilación a la vez en el servidor.
-CERROJO_COMPILAR=$RAIZ/var/run/compilar.lock
 ESPERA=${SEMILLERO_ACT_ESPERA:-60}
-TIEMPO_COMPILACION=3600
+# Segundos como mucho de git ls-remote.
+TIEMPO_GIT=120
 CONSERVAR=3
 # Fallos seguidos de una etiqueta antes de darla por fallida.
 MAX_INTENTOS=2
@@ -162,12 +166,12 @@ error()
 
 uso()
 {
-	echo "uso: $0 [--comprobar | --ref REF]" >&2
+	echo "uso: $0 [--comprobar]" >&2
 	exit 2
 }
 
-# Texto que viene de fuera (la jail de compilación), recortado y sin nada
-# raro, para el registro.
+# Texto que viene de fuera (el servidor git), recortado y sin nada raro,
+# para el registro.
 limpio()
 {
 	printf '%s' "$1" | head -c 60 | tr -c 'A-Za-z0-9._-' '?'
@@ -194,6 +198,50 @@ fichero_seguro()
 	esac
 }
 
+# Como fichero_seguro, y además que nadie más lo pueda leer (la clave de
+# despliegue).
+fichero_privado()
+{
+	fichero_seguro "$1" || return 1
+	case $(ls -ldn -- "$1") in
+	-???------*) return 0 ;;
+	esac
+	return 1
+}
+
+# Ruta absoluta sin nada que el shell de GIT_SSH_COMMAND pueda partir o
+# interpretar.
+ruta_limpia()
+{
+	case $1 in
+	/*) ;;
+	*) return 1 ;;
+	esac
+	case $1 in
+	*[!A-Za-z0-9._/-]* | *..*) return 1 ;;
+	esac
+}
+
+# Las etiquetas del repositorio: git ls-remote --tags de REPO_URL, desde el
+# host. No clona, no trae objetos y no ejecuta nada del repositorio. Sin la
+# configuración de git ni la de ssh de root, solo por ssh, https o una ruta
+# local y sin preguntar nada (si pidiera contraseña, falla). Desde la
+# carpeta de trabajo, vacía, y sin buscar un repositorio más arriba: git no
+# mira ningún repositorio local.
+ls_remoto()
+{
+	(
+		cd "$TRABAJO" || exit 1
+		if [ -n "$_ssh_orden" ]; then
+			GIT_SSH_COMMAND=$_ssh_orden
+			export GIT_SSH_COMMAND
+		fi
+		GIT_CEILING_DIRECTORIES=$(dirname "$TRABAJO") GIT_CONFIG_NOSYSTEM=1 \
+			GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GIT_ALLOW_PROTOCOL=ssh:https:file \
+			timeout "$TIEMPO_GIT" git ls-remote --tags "$REPO_URL" 'v*'
+	)
+}
+
 # Etiqueta vX.Y.Z (version_valida, deploy/lib/precompiladas.sh).
 etiqueta_valida()
 {
@@ -217,39 +265,6 @@ desplegada()
 {
 	_t=$(readlink "$CURRENT" 2>/dev/null) || return 0
 	basename "$_t"
-}
-
-# Ejecuta el guion $2 en la jail de compilación como $USUARIO_COMPILAR,
-# dentro del clon y con PATH=$1; el resto de argumentos le llegan como $1,
-# $2… Nunca hereda el descriptor 9 (el cerrojo de compilación del host).
-en_jail_compilar()
-{
-	_path=$1
-	_guion=$2
-	shift 2
-	jexec -l -U "$USUARIO_COMPILAR" "$JAIL_COMPILAR" /bin/sh -c "
-		PATH=$_path
-		GIT_SSH_COMMAND='ssh -o BatchMode=yes -o ConnectTimeout=15'
-		export PATH GIT_SSH_COMMAND
-		cd $CLON || exit 1
-		$_guion" sh "$@" 9<&-
-}
-
-# Para compilar: con ~/.cargo/bin delante.
-en_compilar()
-{
-	en_jail_compilar "\$HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin" "$@"
-}
-
-# Para lo que el host usa (etiquetas, commits, Cargo.toml): PATH del sistema
-# y `git` es siempre $GIT. Aun así, la salida no es de fiar (el clon lo puede
-# tocar el código que se compila): se valida todo antes de usarlo.
-en_git()
-{
-	_g=$1
-	shift
-	en_jail_compilar /usr/local/bin:/usr/bin:/bin "git() { $GIT \"\$@\"; }
-		$_g" "$@"
 }
 
 servicio()
@@ -301,12 +316,12 @@ sirve()
 	return 1
 }
 
-# /salud responde "ok":true con la versión de releases/$1 (X.Y.Z, o lo que
-# va antes del primer «-» en las de --ref) y la sirve releases/$1, como mucho
-# en $ESPERA segundos. fetch falla con cualquier respuesta que no sea 2xx.
+# /salud responde "ok":true con la versión de releases/$1 (X.Y.Z) y la sirve
+# releases/$1, como mucho en $ESPERA segundos. fetch falla con cualquier
+# respuesta que no sea 2xx.
 sana()
 {
-	_ver=${1%%-*}
+	_ver=$1
 	_fin=$(($(date +%s) + ESPERA))
 	while [ "$(date +%s)" -lt "$_fin" ]; do
 		_r=$(jexec "$JAIL" /usr/bin/fetch -T 2 -qo - "http://$ESCUCHA/salud" 2>/dev/null) || _r=
@@ -348,44 +363,80 @@ asentar()
 		chmod 755 "$1/semillero" && touch "$1"
 }
 
-# Qué hacer con la etiqueta $1 (versión $2) según el buzón: instalar,
-# esperar o compilar (decidir_precompilada).
-decidir()
+# Un aviso sobre Forgejo (desactivado, sin curl, token que no vale) que se
+# dice una sola vez: hasta que cambie o Forgejo vuelva a poderse usar.
+avisar_forgejo()
 {
-	_llegada=no
-	if precompilada_llegada "$BUZON" "$2"; then
-		_llegada=si
+	if [ "$(cat "$ESTADO/forgejo-aviso" 2>/dev/null)" = "$1" ]; then
+		return 0
 	fi
-	decidir_precompilada "$ESTADO/precompilada" "$1" "$(date +%s)" \
-		"$PRECOMPILADAS_ESPERA" "$_llegada"
+	printf '%s\n' "$1" >"$ESTADO/forgejo-aviso"
+	log "$1"
 }
 
-# Instala en releases/$2 la versión precompilada del buzón de la etiqueta $1
-# con commit $3. Si no cuadra, lo registra y sale con 1. En los dos casos
-# vacía la carpeta de esa versión del buzón: un segundo intento ya no la
-# tiene y compila aquí.
-instalar_precompilada()
+# ¿Se puede usar Forgejo? Configurado (FORGEJO_URL y FORGEJO_REPO), con
+# curl y con el token en un fichero de root que nadie más puede leer. Si
+# no, deja el motivo en _fj_motivo y lo avisa una vez; el token no se lee.
+forgejo_listo()
 {
+	_fj_motivo=
+	if [ -z "$FORGEJO_URL" ] || [ -z "$FORGEJO_REPO" ]; then
+		avisar_forgejo "Forgejo desactivado (FORGEJO_URL o FORGEJO_REPO vacías en $CONF): no se mira su release"
+		return 1
+	fi
+	if ! command -v curl >/dev/null 2>&1; then
+		_fj_motivo="falta curl (pkg install curl)"
+	elif ! fichero_privado "$RAIZ$FORGEJO_TOKEN_FICHERO"; then
+		_fj_motivo="FORGEJO_TOKEN_FICHERO ($FORGEJO_TOKEN_FICHERO) falta o no es un fichero de root que solo root pueda leer; no se usa"
+	fi
+	if [ -n "$_fj_motivo" ]; then
+		avisar_forgejo "Forgejo no se puede usar: $_fj_motivo"
+		return 1
+	fi
+	rm -f "$ESTADO/forgejo-aviso"
+}
+
+# Instala en releases/$2 la versión de la etiqueta $1 (commit $3) de la
+# release de Forgejo (preparar_forgejo). Sale con 0 si queda instalada; 1 si
+# aún no se puede usar (sin release, incompleta, sin red…: el motivo queda
+# en _fj_motivo, para la línea de la espera) y 2 si se rechaza (lo dice como
+# ERROR una vez por etiqueta y motivo). La release se queda en Forgejo: si
+# no valía, se vuelve a mirar en cada pasada (la puede rehacer el runner) y
+# se sigue con GitHub. Nunca queda nada instalado si no sale con 0.
+instalar_forgejo()
+{
+	_fj_motivo=
 	_tmp=$RELEASES/.$2.tmp
 	rm -rf "$_tmp"
-	_r=1
-	if _err=$(preparar_precompilada "$BUZON" "$2" "$3" "$_tmp" 2>&1) &&
-		asentar "$_tmp" && mv "$_tmp" "$RELEASES/$2"; then
-		log "instalada la versión precompilada de $1 (commit $(printf '%.12s' "$3"))"
-		_r=0
-	else
-		error "versión precompilada de $1 rechazada: $(printf '%s' "${_err:-no se puede instalar}" | head -n 1); ${_siguiente:-se compila aquí}"
+	_err=$(preparar_forgejo "$FORGEJO_URL" "$FORGEJO_REPO" "$RAIZ$FORGEJO_TOKEN_FICHERO" "$2" "$3" "$_tmp" 2>&1)
+	_rf=$?
+	_err=$(printf '%s' "${_err:-no se puede instalar}" | head -n 1)
+	if [ "$_rf" -eq 0 ] && asentar "$_tmp" && mv "$_tmp" "$RELEASES/$2"; then
+		log "instalada la versión de Forgejo de $1 ($FORGEJO_REPO, commit $(printf '%.12s' "$3"))"
+		return 0
 	fi
-	rm -rf "$_tmp" "${BUZON:?}/$2"
-	return "$_r"
+	rm -rf "$_tmp"
+	if [ "$_rf" -eq 1 ]; then
+		_fj_motivo=$_err
+		return 1
+	fi
+	# El mismo rechazo de la misma release no se repite en cada pasada.
+	if [ "$(cat "$ESTADO/forgejo-rechazada" 2>/dev/null)" != "$1 $_err" ]; then
+		printf '%s\n' "$1 $_err" >"$ESTADO/forgejo-rechazada"
+		error "versión de Forgejo de $1 rechazada: $_err"
+	fi
+	return 2
 }
 
 # Instala en releases/$2 la versión de la etiqueta $1 publicada en GitHub
-# (GITHUB_REPO), con su atestación comprobada (preparar_github). Si no se
-# puede usar, lo dice en una línea (como error si no cuadra; si aún no está,
-# no) y sale con 1: nunca queda nada instalado.
+# (GITHUB_REPO), con su atestación comprobada (preparar_github). Sale con 0
+# si queda instalada; 1 si aún no se puede usar (sin release, sin red…: el
+# motivo queda en _gh_motivo, para la línea de la espera) y 2 si se rechaza
+# (lo dice como ERROR una vez por etiqueta y motivo). Nunca queda nada
+# instalado si no sale con 0.
 instalar_github()
 {
+	_gh_motivo=
 	_tmp=$RELEASES/.$2.tmp
 	rm -rf "$_tmp"
 	_err=$(preparar_github "$GITHUB_REPO" "$2" "$_tmp" 2>&1)
@@ -397,126 +448,33 @@ instalar_github()
 	fi
 	rm -rf "$_tmp"
 	if [ "$_rg" -eq 1 ]; then
-		log "no se usa GitHub para $1: $_err"
-	else
+		_gh_motivo=$_err
+		return 1
+	fi
+	# El mismo rechazo de la misma release no se repite en cada pasada.
+	if [ "$(cat "$ESTADO/github-rechazada" 2>/dev/null)" != "$1 $_err" ]; then
+		printf '%s\n' "$1 $_err" >"$ESTADO/github-rechazada"
 		error "versión de GitHub de $1 rechazada: $_err"
 	fi
-	return 1
+	return 2
 }
 
-# Compila en la jail de compilación la referencia $1 (commit $3) y deja el
-# resultado en releases/$2. Sale con 0 si queda instalada, 1 si falla la
-# compilación (cuenta como fallo de la etiqueta), 2 si hay otra compilación
-# en marcha en el host y 3 si falla algo del servidor.
-compilar_aqui()
+# Ninguna versión precompilada de la etiqueta $1 (versión $2) se puede usar
+# todavía: se dice una vez por etiqueta y se reintenta en la pasada
+# siguiente, sin límite y sin contarlo como fallo.
+esperar()
 {
-	# Cerrojo neutro del host, en este mismo proceso (lockf con descriptor:
-	# dura lo que dure el descriptor 9 abierto). Solo de lectura; la jail de
-	# compilación no lo hereda (en_jail_compilar lo cierra).
-	: >>"$CERROJO_COMPILAR" 2>/dev/null
-	if [ ! -f "$CERROJO_COMPILAR" ] || [ ! -r "$CERROJO_COMPILAR" ]; then
-		error "no se puede abrir el cerrojo de compilación $CERROJO_COMPILAR"
-		return 3
+	if [ "$(cat "$ESTADO/esperando" 2>/dev/null)" = "$1" ]; then
+		return 0
 	fi
-	exec 9<"$CERROJO_COMPILAR"
-	# 75 (EX_TEMPFAIL): lo tiene otro. Cualquier otro error no es «ocupado»:
-	# callarlo dejaría de compilar para siempre sin decir por qué.
-	lockf -s -t 0 9
-	case $? in
-	0) ;;
-	75)
-		exec 9<&-
-		log "hay otra compilación en marcha en el servidor; se reintenta en la próxima pasada"
-		return 2
-		;;
-	*)
-		exec 9<&-
-		error "lockf no puede tomar el cerrojo de compilación $CERROJO_COMPILAR"
-		return 3
-		;;
-	esac
-	compilar_y_sacar "$@"
-	_r=$?
-	exec 9<&-
-	return "$_r"
-}
-
-compilar_y_sacar()
-{
-	_ref=$1
-	_nombre=$2
-	_commit=$3
-	if ! en_git 'git -c advice.detachedHead=false checkout --quiet --force --detach "$1" &&
-		git clean -fdxq -e target' "$_ref" >"$LOG_COMPILACION" 2>&1; then
-		error "no se puede sacar $(printf '%.12s' "$_commit") del repositorio (ver $LOG_COMPILACION)"
-		return 1
-	fi
-	log "compilando $_nombre aquí ($(printf '%.12s' "$_commit"))"
-	# wasm-bindgen-cli tiene que ser exactamente la versión de wasm-bindgen
-	# del Cargo.lock; si el repositorio la cambia, se instala la nueva.
-	if ! en_compilar '
-		quiere=$(awk "/^name = \"wasm-bindgen\"\$/ { getline; gsub(/version = |\"/, \"\"); print; exit }" Cargo.lock)
-		tiene=$(wasm-bindgen --version 2>/dev/null | cut -d" " -f2)
-		if [ -n "$quiere" ] && [ "$quiere" != "$tiene" ]; then
-			echo "instalando wasm-bindgen-cli $quiere (había: ${tiene:-ninguno})"
-			cargo install --locked wasm-bindgen-cli --version "$quiere" || exit 1
-		fi
-		# Trabajos a la vez (menos trabajos, menos memoria) y prioridad
-		# baja, para que el resto del servidor no lo note.
-		case $1 in
-		"") ;;
-		*[!0-9]* | 0*) echo "TRABAJOS_COMPILACION no es válida; se usa el valor de cargo" ;;
-		*)
-			CARGO_BUILD_JOBS=$1
-			export CARGO_BUILD_JOBS
-			;;
-		esac
-		renice -n 15 $$ >/dev/null 2>&1
-		# Solo se compila; las pruebas se pasan antes de crear la etiqueta.
-		# Un compilador colgado no deja el actualizador esperando para
-		# siempre: falla como cualquier error de compilación.
-		timeout -k 60 "$2" cargo leptos build --release --precompress' \
-		"$TRABAJOS_COMPILACION" "$TIEMPO_COMPILACION" >>"$LOG_COMPILACION" 2>&1; then
-		error "falló la compilación de $_nombre (ver $LOG_COMPILACION)"
-		return 1
-	fi
-	_tmp=$RELEASES/.$_nombre.tmp
-	rm -rf "$_tmp"
-	mkdir -m 700 "$_tmp" || return 3
-	# El tar se genera dentro de la jail; el del host no extrae rutas
-	# absolutas ni con «..». pipefail (en un subshell): si el tar de la jail
-	# falla a medias, la versión se descarta.
-	# shellcheck disable=SC3040 # el sh de FreeBSD (14+) tiene pipefail
-	if ! (
-		set -o pipefail
-		en_compilar 'tar -cf - -C target release/semillero site' |
-			tar -xf - -C "$_tmp" --no-same-owner --no-same-permissions
-	) 2>>"$LOG_COMPILACION"; then
-		error "no se pueden sacar el binario y la web de $_nombre de la jail de compilación"
-		rm -rf "$_tmp"
-		return 1
-	fi
-	if [ -n "$(find "$_tmp" ! -type f ! -type d)" ] ||
-		[ -n "$(find "$_tmp" -type f -links +1)" ] ||
-		[ ! -f "$_tmp/release/semillero" ] || [ ! -d "$_tmp/site" ]; then
-		error "lo compilado de $_nombre no es release/semillero y site/ con ficheros y carpetas normales"
-		rm -rf "$_tmp"
-		return 1
-	fi
-	if ! _err=$(web_completa "$_tmp/site" 2>&1); then
-		error "lo compilado de $_nombre no vale: $_err"
-		rm -rf "$_tmp"
-		return 1
-	fi
-	if ! mv "$_tmp/release/semillero" "$_tmp/semillero" || ! rmdir "$_tmp/release" ||
-		! echo "$_commit" >"$_tmp/COMMIT" || ! asentar "$_tmp" ||
-		! mv "$_tmp" "$RELEASES/$_nombre"; then
-		error "no se puede preparar releases/$_nombre"
-		rm -rf "$_tmp"
-		return 3
-	fi
-	log "compilada $_nombre en el servidor"
-	return 0
+	echo "$1" >"$ESTADO/esperando"
+	_fuentes=
+	if [ -n "$FORGEJO_URL" ] && [ -n "$FORGEJO_REPO" ]; then _fuentes="Forgejo $FORGEJO_REPO"; fi
+	if [ -n "$GITHUB_REPO" ]; then _fuentes="${_fuentes:+$_fuentes o }GitHub $GITHUB_REPO"; fi
+	_fuentes=${_fuentes:-ninguna fuente configurada: FORGEJO_URL y FORGEJO_REPO o GITHUB_REPO}
+	if [ -n "${_fj_motivo:-}" ]; then _fuentes="$_fuentes; Forgejo: $_fj_motivo"; fi
+	if [ -n "${_gh_motivo:-}" ]; then _fuentes="$_fuentes; GitHub: $_gh_motivo"; fi
+	log "esperando la versión precompilada de $2 ($_fuentes); se reintenta en cada pasada"
 }
 
 # Borra las versiones más antiguas; nunca la desplegada.
@@ -605,62 +563,11 @@ jail_la_ve()
 	fi
 }
 
-# --ref REF: compila aquí y despliega REF. Nunca mira el buzón ni toca
-# «fallida» ni «intentos» (son de las etiquetas).
-desplegar_ref()
-{
-	_r=$1
-	if ! en_git "$_git_sh
-		git remote set-url origin \"\$1\" && traer_referencias ." "$REPO_URL" 2>"$TRABAJO/err"; then
-		log "sin acceso al repositorio ($(head -n 1 "$TRABAJO/err" | cut -c1-200)); se compila $1 con lo que ya hay en el clon"
-	fi
-	# Las ramas se toman del remoto si existe; si no, la local.
-	if en_git 'git rev-parse --verify --quiet "origin/$1^{commit}"' "$_r" >/dev/null 2>&1; then
-		_r=origin/$_r
-	fi
-	_commit=$(en_git 'git rev-parse --verify --quiet "$1^{commit}"' "$_r" 2>/dev/null)
-	if ! commit_valido "$_commit"; then
-		error "$1 no existe en el repositorio"
-		exit 1
-	fi
-	_cargo_v=$(en_git 'git show "$1:crates/semillero/Cargo.toml"' "$_commit" 2>/dev/null | version_cargo)
-	if ! version_valida "$_cargo_v"; then
-		error "crates/semillero/Cargo.toml de $1 no tiene una versión X.Y.Z ($(limpio "$_cargo_v"))"
-		exit 1
-	fi
-	_nombre=$_cargo_v-$(printf '%.12s' "$_commit")
-	if [ "$_nombre" = "$(desplegada)" ]; then
-		log "$_nombre ya está desplegada"
-		exit 0
-	fi
-	log "--ref $1: $_nombre (desplegada: $(desplegada))"
-	find "$RELEASES" -maxdepth 1 -name '.*.tmp' -exec rm -rf {} +
-	if [ ! -d "$RELEASES/$_nombre" ]; then
-		compilar_aqui "$_commit" "$_nombre" "$_commit"
-		case $? in
-		0) ;;
-		2) exit 0 ;;
-		*) exit 1 ;;
-		esac
-	fi
-	jail_la_ve "$_nombre" || exit 1
-	desplegar "$_nombre" || exit 1
-	podar
-}
-
 main()
 {
 	_comprobar=
-	_ref=
 	case "$#:${1:-}" in
 	1:--comprobar) _comprobar=1 ;;
-	2:--ref)
-		_ref=$2
-		case $_ref in
-		'' | -* | *[!A-Za-z0-9._/-]* | *..*) uso ;;
-		esac
-		[ "${#_ref}" -le 100 ] || uso
-		;;
 	0: | 1:) ;;
 	*) uso ;;
 	esac
@@ -705,41 +612,17 @@ main()
 		exit 1
 		;;
 	esac
-	case $USUARIO_COMPILAR in
-	'' | -* | *[!A-Za-z0-9_-]*)
-		error "USUARIO_COMPILAR no válido"
+	case $JAIL in
+	'' | *[!A-Za-z0-9_-]*)
+		error "JAIL no válida"
 		exit 1
 		;;
 	esac
-	# El clon, dentro de la jail de compilación.
-	CLON=/home/$USUARIO_COMPILAR/semillero
-	for _j in "$JAIL" "$JAIL_COMPILAR"; do
-		case $_j in
-		'' | *[!A-Za-z0-9_-]*)
-			error "JAIL o JAIL_COMPILAR no válida"
-			exit 1
-			;;
-		esac
-	done
 	JAIL_RAIZ=${JAIL_RAIZ:-/usr/local/jails/containers/$JAIL}
 	case $JAIL_RAIZ in
 	/*) ;;
 	*)
 		error "JAIL_RAIZ tiene que ser una ruta absoluta"
-		exit 1
-		;;
-	esac
-	case $PRECOMPILADAS_ESPERA in
-	'' | 0) ;;
-	*[!0-9]* | 0*)
-		error "PRECOMPILADAS_ESPERA tiene que ser un número de minutos (o vacía)"
-		exit 1
-		;;
-	esac
-	case $TRABAJOS_COMPILACION in
-	'') ;;
-	*[!0-9]* | 0*)
-		error "TRABAJOS_COMPILACION tiene que ser un número mayor que 0 (o vacía)"
 		exit 1
 		;;
 	esac
@@ -752,11 +635,49 @@ main()
 	done
 	# shellcheck source=../lib/precompiladas.sh
 	. "$RAIZ$LIBEXEC/precompiladas.sh"
+	# shellcheck source=../lib/git.sh
+	. "$RAIZ$LIBEXEC/git.sh"
 	if [ -n "$GITHUB_REPO" ] && ! repo_github_valido "$GITHUB_REPO"; then
 		error "GITHUB_REPO tiene que ser propietario/repositorio de GitHub (p. ej. ejemplo/semillero) o vacía"
 		exit 1
 	fi
-	for _orden in tar jexec sockstat file timeout lockf; do
+	FORGEJO_URL=${FORGEJO_URL%/}
+	if [ -n "$FORGEJO_URL" ] && ! url_forgejo_valida "$FORGEJO_URL"; then
+		error "FORGEJO_URL tiene que ser la URL de Forgejo (p. ej. https://forja.example) o vacía"
+		exit 1
+	fi
+	if [ -n "$FORGEJO_REPO" ] && ! repo_forgejo_valido "$FORGEJO_REPO"; then
+		error "FORGEJO_REPO tiene que ser propietario/nombre del repositorio en Forgejo (p. ej. ejemplo/semillero) o vacía"
+		exit 1
+	fi
+	if ! ruta_limpia "$FORGEJO_TOKEN_FICHERO"; then
+		error "FORGEJO_TOKEN_FICHERO tiene que ser una ruta absoluta sin espacios ni caracteres raros"
+		exit 1
+	fi
+	# Por ssh: la clave de despliegue y la del servidor git, del host.
+	_ssh_orden=
+	if repo_por_ssh "$REPO_URL"; then
+		if ! ruta_limpia "$CLAVE_DESPLIEGUE" || ! ruta_limpia "$RAIZ$CLAVE_DESPLIEGUE"; then
+			error "CLAVE_DESPLIEGUE tiene que ser una ruta absoluta sin espacios ni caracteres raros; no se hace nada"
+			exit 1
+		fi
+		if ! ruta_limpia "$HOSTS_CONOCIDOS" || ! ruta_limpia "$RAIZ$HOSTS_CONOCIDOS"; then
+			error "HOSTS_CONOCIDOS tiene que ser una ruta absoluta sin espacios ni caracteres raros; no se hace nada"
+			exit 1
+		fi
+		if ! fichero_privado "$RAIZ$CLAVE_DESPLIEGUE"; then
+			error "la clave de despliegue CLAVE_DESPLIEGUE ($CLAVE_DESPLIEGUE) falta o no es un fichero de root que solo root pueda leer (se crea con deploy/freebsd/install.sh); no se hace nada"
+			exit 1
+		fi
+		if ! fichero_seguro "$RAIZ$HOSTS_CONOCIDOS" || [ ! -s "$RAIZ$HOSTS_CONOCIDOS" ]; then
+			error "falta HOSTS_CONOCIDOS ($HOSTS_CONOCIDOS), la clave del servidor git, o no es un fichero de root que nadie más pueda escribir (ver deploy/README.md); no se hace nada"
+			exit 1
+		fi
+		_ssh_orden="ssh -F /dev/null -i $RAIZ$CLAVE_DESPLIEGUE -o IdentitiesOnly=yes"
+		_ssh_orden="$_ssh_orden -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RAIZ$HOSTS_CONOCIDOS"
+		_ssh_orden="$_ssh_orden -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=15"
+	fi
+	for _orden in git tar jexec sockstat file timeout; do
 		command -v "$_orden" >/dev/null 2>&1 || {
 			error "falta $_orden"
 			exit 1
@@ -768,11 +689,16 @@ main()
 	trap 'rm -rf "$TRABAJO"' EXIT
 	trap 'exit 143' INT TERM
 
-	# Las funciones de git.sh se mandan a la jail como texto.
-	_git_sh=$(cat "$RAIZ$LIBEXEC/git.sh")
-	if [ -n "$_ref" ]; then
-		desplegar_ref "$_ref"
-		exit 0
+	if [ -n "$_comprobar" ]; then
+		if [ -z "$FORGEJO_URL" ] || [ -z "$FORGEJO_REPO" ]; then
+			echo "versiones de Forgejo: desactivado (FORGEJO_URL o FORGEJO_REPO vacías)"
+		elif ! command -v curl >/dev/null 2>&1; then
+			echo "versiones de Forgejo: $FORGEJO_URL $FORGEJO_REPO (falta curl; pkg install curl)"
+		elif ! fichero_privado "$RAIZ$FORGEJO_TOKEN_FICHERO"; then
+			echo "versiones de Forgejo: $FORGEJO_URL $FORGEJO_REPO (FORGEJO_TOKEN_FICHERO falta o no es de root y solo suyo)"
+		else
+			echo "versiones de Forgejo: $FORGEJO_URL $FORGEJO_REPO (curl y token listos)"
+		fi
 	fi
 	if [ -n "$_comprobar" ] && [ -n "$GITHUB_REPO" ]; then
 		_faltan=
@@ -785,29 +711,30 @@ main()
 			echo "versiones de GitHub: $GITHUB_REPO (gh y jq instalados)"
 		fi
 	fi
-	if [ -n "$_comprobar" ]; then
-		# Sin traer nada: ls-remote no cambia el clon.
-		if ! _etiqueta=$(en_git "$_git_sh
-			ultima_etiqueta_remota \"\$1\"" "$REPO_URL" 2>"$TRABAJO/err"); then
-			echo "sin acceso al repositorio: $(head -n 1 "$TRABAJO/err" | cut -c1-200)" >&2
+	if ! _lista=$(ls_remoto 2>"$TRABAJO/err"); then
+		_e=$(grep -v '^[[:space:]]*$' "$TRABAJO/err" | head -n 1 | cut -c1-200)
+		if [ -n "$_comprobar" ]; then
+			echo "sin acceso al repositorio: $_e" >&2
 			exit 1
 		fi
-	else
-		if ! _salida=$(en_git "$_git_sh
-			git remote set-url origin \"\$1\" && traer_ultima_etiqueta ." "$REPO_URL" 2>"$TRABAJO/err"); then
-			log "sin acceso al repositorio desde $JAIL_COMPILAR: $(head -n 1 "$TRABAJO/err" | cut -c1-200)"
-			exit 0
-		fi
-		_etiqueta=$(printf '%s\n' "$_salida" | tail -n 1)
+		log "sin acceso al repositorio: $_e"
+		exit 0
 	fi
-	if [ -z "$_etiqueta" ]; then
+	_linea=$(printf '%s\n' "$_lista" | ultima_etiqueta_ls_remote)
+	if [ -z "$_linea" ]; then
 		if [ -n "$_comprobar" ]; then echo "no hay ninguna etiqueta vX.Y.Z"; fi
 		exit 0
 	fi
-	# Lo que sale de la jail de compilación no es de fiar: el nombre acaba en
-	# rutas que root borra.
+	_etiqueta=${_linea%% *}
+	_commit=${_linea#* }
+	# Lo que dice el servidor git no es de fiar: el nombre acaba en rutas que
+	# root borra.
 	if ! etiqueta_valida "$_etiqueta"; then
 		error "la última etiqueta no es vX.Y.Z válida ($(limpio "$_etiqueta"))"
+		exit 1
+	fi
+	if ! commit_valido "$_commit"; then
+		error "git ls-remote no da un commit válido para $_etiqueta; no se hace nada"
 		exit 1
 	fi
 	_v=${_etiqueta#v}
@@ -821,77 +748,35 @@ main()
 		exit 0
 	fi
 	if [ -n "$_comprobar" ]; then
-		_buzon=no
-		if precompilada_llegada "$BUZON" "$_v"; then _buzon=sí; fi
-		echo "hay una versión nueva: $_v (desplegada: ${_hay:-ninguna}; en el buzón: $_buzon); se desplegaría"
+		echo "hay una versión nueva: $_v (desplegada: ${_hay:-ninguna}); se desplegaría en cuanto haya una versión precompilada que cuadre"
 		exit 0
 	fi
 
-	# La versión que dirá /salud es la de Cargo.toml: tiene que ser la de la
-	# etiqueta, o el despliegue fallaría siempre.
-	_cargo_v=$(en_git 'git show "$1:crates/semillero/Cargo.toml"' "refs/tags/$_etiqueta" 2>/dev/null | version_cargo)
-	if [ "$_cargo_v" != "$_v" ]; then
-		error "la versión de crates/semillero/Cargo.toml en $_etiqueta es «$(limpio "$_cargo_v")», no $_v; no se despliega"
-		fallo_etiqueta "$_etiqueta"
-		exit 1
-	fi
-	_commit=$(en_git 'git rev-parse --verify --quiet "$1^{commit}"' "refs/tags/$_etiqueta" 2>/dev/null)
-	if ! commit_valido "$_commit"; then
-		error "git no da un commit válido para $_etiqueta; no se hace nada"
-		exit 1
-	fi
-
 	if [ ! -d "$RELEASES/$_v" ]; then
-		_decision=compilar
-		if [ -n "$PRECOMPILADAS_ESPERA" ]; then
-			_decision=$(decidir "$_etiqueta" "$_v")
-		fi
-		# GitHub solo en el primer intento de la etiqueta: si ya falló una
-		# vez, se compila aquí (como el buzón, que ya no la tiene).
-		_github=
-		if [ -n "$GITHUB_REPO" ]; then
-			_github=1
-			if [ -f "$ESTADO/intentos" ] && [ "$(sed -n 1p "$ESTADO/intentos")" = "$_etiqueta" ]; then
-				_github=
-			fi
-		fi
-		if [ "$_decision" = esperar ] && [ -z "$_github" ]; then
-			log "esperando la versión precompilada de $_etiqueta (hasta $PRECOMPILADAS_ESPERA min desde que se vio la etiqueta)"
-			exit 0
-		fi
-		if [ "$_decision" != esperar ]; then
-			log "versión nueva $_v (desplegada: ${_hay:-ninguna})"
-		fi
 		# Restos de una ejecución cortada a medias.
 		find "$RELEASES" -maxdepth 1 -name '.*.tmp' -exec rm -rf {} +
-		_siguiente=
-		if [ -n "$_github" ]; then _siguiente="se prueba GitHub"; fi
-		if [ "$_decision" = instalar ] && instalar_precompilada "$_etiqueta" "$_v" "$_commit"; then
-			_decision=instalada
-		fi
-		if [ "$_decision" != instalada ] && [ -n "$_github" ] && instalar_github "$_etiqueta" "$_v"; then
-			_decision=instalada
-		fi
-		if [ "$_decision" = esperar ]; then
-			log "esperando la versión precompilada de $_etiqueta (hasta $PRECOMPILADAS_ESPERA min desde que se vio la etiqueta)"
-			exit 0
-		fi
-		if [ "$_decision" = compilar ] && [ -n "$PRECOMPILADAS_ESPERA" ]; then
-			log "no ha llegado la versión precompilada de $_etiqueta; se compila aquí"
-		elif [ "$_decision" = instalar ] && [ -n "$_github" ]; then
-			log "tampoco vale la de GitHub; se compila aquí"
-		fi
-		if [ "$_decision" != instalada ]; then
-			compilar_aqui "refs/tags/$_etiqueta" "$_v" "$_commit"
+		_instalada=
+		_rechazada=
+		_fj_motivo=
+		if forgejo_listo; then
+			instalar_forgejo "$_etiqueta" "$_v" "$_commit"
 			case $? in
-			0) ;;
-			1)
-				fallo_etiqueta "$_etiqueta"
-				exit 1
-				;;
-			2) exit 0 ;;
-			*) exit 1 ;;
+			0) _instalada=1 ;;
+			2) _rechazada=1 ;;
 			esac
+		fi
+		_gh_motivo=
+		if [ -z "$_instalada" ] && [ -n "$GITHUB_REPO" ]; then
+			instalar_github "$_etiqueta" "$_v"
+			case $? in
+			0) _instalada=1 ;;
+			2) _rechazada=1 ;;
+			esac
+		fi
+		if [ -z "$_instalada" ]; then
+			esperar "$_etiqueta" "$_v"
+			if [ -n "$_rechazada" ]; then exit 1; fi
+			exit 0
 		fi
 	else
 		log "versión nueva $_v (desplegada: ${_hay:-ninguna}; ya estaba en releases)"
@@ -901,7 +786,9 @@ main()
 		fallo_etiqueta "$_etiqueta"
 		exit 1
 	fi
-	rm -f "$ESTADO/fallida" "$ESTADO/intentos" "$ESTADO/precompilada"
+	# «precompilada» es el estado de la espera de antes (PRECOMPILADAS_ESPERA).
+	rm -f "$ESTADO/fallida" "$ESTADO/intentos" "$ESTADO/esperando" \
+		"$ESTADO/github-rechazada" "$ESTADO/forgejo-rechazada" "$ESTADO/precompilada"
 	podar
 }
 

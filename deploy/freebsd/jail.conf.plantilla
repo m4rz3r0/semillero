@@ -1,7 +1,0 @@
-# Jail de compilación de semillero (para /etc/jail.conf). Tiene la cadena de
-# Rust y el clon del repositorio; no expone nada. La rellena y la escribe
-# install.sh; no se añade sola.
-@JAIL_COMPILAR@ {
-    allow.chflags;
-    ip4.addr = @JAIL_COMPILAR_IP@;
-}

@@ -50,10 +50,12 @@ cd C:\semillero
 Pregunta dónde escucha, la dirección con la que lo abres en el navegador,
 la de qBittorrent y cómo entra en él (ver
 [Preparar qBittorrent](qbittorrent.md); con qBittorrent en este Windows,
-cualquiera de los dos modos; si no, el modo con contraseña), el proxy y
-Jellyfin. Intro deja el valor propuesto y las contraseñas no se ven al
-escribirlas. Antes de guardar comprueba qBittorrent (y Jellyfin) y dice qué
-falla.
+cualquiera de los dos modos; si no, el modo con contraseña), el proxy,
+Jellyfin, el fichero de estado de la VPN y la base de datos (con Intro,
+`semillero.cmd` la deja en `datos\`). Intro deja el valor propuesto y las
+contraseñas no se ven al escribirlas. Antes de guardar comprueba
+qBittorrent (y Jellyfin) y dice qué falla; si algo falla (por ejemplo,
+qBittorrent aún no está en marcha), pregunta si guardar de todos modos.
 
 Escribe `semillero.env` en esa carpeta y la contraseña de qBittorrent y la
 clave de Jellyfin en `qbt.clave` y `jellyfin.clave`, junto a él. Los

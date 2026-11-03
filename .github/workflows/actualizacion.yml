@@ -1,0 +1,58 @@
+# Prueba del salto de versión en cada push y pull request: la última
+# versión publicada anterior a la de Cargo.toml arranca como la deja la guía
+# (con la clave de Jellyfin donde la busca por defecto), se le meten datos y
+# el binario nuevo, compilado de este commit, tiene que arrancar con la misma
+# configuración y los mismos ficheros y conservar todas las filas
+# (tools/ci/salto-de-version.sh). Existe porque la 0.3.0 cambió sin migración
+# la ruta por defecto de la clave de Jellyfin y ninguna prueba lo vio.
+#
+# Las acciones de terceros van fijadas por commit (con su versión al lado);
+# para subirlas, git ls-remote https://github.com/<dueño>/<acción> refs/tags/<versión>
+# (con ^{} si la etiqueta es anotada).
+
+name: actualizacion
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: actualizacion-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Lo que cargo-leptos deja fijado al compilar, como en release.yml.
+  LEPTOS_OUTPUT_NAME: semillero
+
+jobs:
+  salto:
+    name: Salto desde la versión publicada anterior
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      # gh attestation verify del paquete que se descarga (solo lectura).
+      attestations: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Herramientas
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends shellcheck sqlite3
+      - name: Sintaxis
+        run: shellcheck -x tools/ci/salto-*.sh
+      - name: Rust de rust-toolchain.toml
+        run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Salto de versión
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SALTO_ATESTACION: "1"
+        run: sh tools/ci/salto-de-version.sh

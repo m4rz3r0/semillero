@@ -99,6 +99,16 @@ pub async fn con_sim_y(conf: qbt_sim::Conf, ajustar: impl FnOnce(&mut Config)) -
     montar_con(&url, Some(sim), ajustar).await
 }
 
+/// semillero contra un qBittorrent de verdad en `url`, en modo con
+/// contraseña con `cuenta` (ver `real`).
+pub async fn con_qbt(url: &str, cuenta: semillero::config::ConfCuentaQbt) -> Prueba {
+    montar_con(url, None, |c| {
+        c.login_desde = None;
+        c.cuenta_qbt = Some(cuenta);
+    })
+    .await
+}
+
 /// qBittorrent apagado. El puerto 1 (tcpmux) no escucha: reservar un puerto
 /// libre y soltarlo dejaba que el simulador de otra prueba en paralelo lo
 /// ocupara entre medias.

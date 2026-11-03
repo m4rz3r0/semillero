@@ -68,6 +68,7 @@ async fn configurar(dir: &Path, lineas: &[&str], entorno: &[(&str, &str)]) -> Sa
             .arg(&env)
             .current_dir(&dir)
             .env_clear()
+            .envs(de_windows())
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())
             .envs(entorno)
             .stdin(Stdio::piped())
@@ -484,6 +485,7 @@ async fn los_secretos_van_a_la_carpeta_de_secretos() {
                 .arg("--secretos")
                 .arg(&secretos)
                 .env_clear()
+                .envs(de_windows())
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -503,6 +505,15 @@ async fn los_secretos_van_a_la_carpeta_de_secretos() {
         assert_eq!(modo(&clave), 0o600);
         assert_eq!(modo(&secretos), 0o700);
     }
+}
+
+/// Lo que un proceso de Windows necesita aunque se le vacíe el entorno: sin
+/// `SystemRoot` no puede abrir conexiones (WSAStartup falla). En Unix no hay.
+fn de_windows() -> Vec<(&'static str, std::ffi::OsString)> {
+    std::env::var_os("SystemRoot")
+        .map(|v| ("SystemRoot", v))
+        .into_iter()
+        .collect()
 }
 
 #[tokio::test]

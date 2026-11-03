@@ -3,6 +3,53 @@
 Lo que cambia en cada versión publicada. Lo que viene después, en
 [ROADMAP.md](ROADMAP.md).
 
+## 0.5.0
+
+El programa, la base de datos, los presets y la configuración de semillero
+no cambian. El que cambia es el actualizador de FreeBSD (`deploy/`): si ya
+lo usas, sigue «Migrar una instalación existente» en
+[deploy/README.md](deploy/README.md) (y, si tenías buzón, «Migrar desde el
+buzón») y vuelve a pasar `deploy/freebsd/install.sh`.
+
+- Hace falta qBittorrent 5.0 o posterior. Con la 4.6 semillero no puede
+  parar ni reanudar torrents (su API aún no tiene `torrents/stop` ni
+  `torrents/start`); el README dice qué versiones se prueban.
+- La integración continua prueba ahora donde se instala:
+  - de punta a punta contra un qBittorrent de verdad (5.1 y 5.3): entrar,
+    clasificar, avisar, cancelar un aviso y borrar en modo real;
+  - una máquina FreeBSD (14 y 15) que sigue la guía con el `rc.d`;
+  - en Windows, todas las pruebas, `semillero configurar`, el arranque y
+    que la web contesta en `127.0.0.1`;
+  - la actualización desde la versión publicada anterior, con su
+    configuración y sus datos.
+- Guías: la de FreeBSD crea `/usr/local/etc/rc.d` en la jail (una jail
+  nueva no lo trae) y la de Windows cuenta todas las preguntas de
+  `semillero configurar`. El ejemplo de configuración de Windows pone la
+  contraseña de qBittorrent donde la deja `configurar`.
+- Actualizador de FreeBSD:
+  - Ya no compila en el servidor: fuera la jail de compilación,
+    `PRECOMPILADAS_ESPERA` y `TRABAJOS_COMPILACION`. Las etiquetas las
+    pregunta con `git ls-remote`, sin clon; con un `REPO_URL` por ssh, con
+    una clave de despliegue de solo lectura (`CLAVE_DESPLIEGUE`,
+    `HOSTS_CONOCIDOS`).
+  - Ya no hay buzón. La versión de FreeBSD la compila, al subir una
+    etiqueta `vX.Y.Z` a Forgejo, un runner de Forgejo Actions en el PC
+    (`.forgejo/workflows/freebsd.yml`) y la publica como la release de
+    Forgejo de esa etiqueta; con el PC apagado, el trabajo espera en cola.
+    `semillero-actualizar` la descarga con un token de solo lectura
+    (`FORGEJO_URL`, `FORGEJO_REPO`, `FORGEJO_TOKEN_FICHERO`; necesita
+    `curl`) y la comprueba como antes; GitHub (`GITHUB_REPO`) sigue como
+    segunda fuente.
+  - Si ninguna fuente tiene la versión, espera sin límite y sin contarlo
+    como fallo.
+  - El registro dice por qué falla una descarga, y si `gh` no puede
+    comprobar la atestación (por ejemplo, sin red) la versión de GitHub se
+    espera en lugar de darse por rechazada.
+  - Fuera `recibir-precompilada.sh`, `lanzar.sh`, `entregar.sh`,
+    `compilar-freebsd.sh --entregar` y `--ultima`, el temporizador
+    `semillero-cross` y `deploy/config.example`. Al migrar, quita el usuario
+    `smentrega`, su línea de `authorized_keys` y de `AllowUsers`.
+
 ## 0.4.1
 
 Al actualizar no hay que hacer nada.

@@ -101,6 +101,24 @@ repositorio.
 
 Sustituye `X.Y.Z` por la versión.
 
+### Versiones de qBittorrent que valen
+
+La CI prueba cada cambio de punta a punta contra un qBittorrent de verdad
+(la imagen oficial `qbittorrentofficial/qbittorrent-nox`, en un
+contenedor): entrar, clasificar, avisar, cancelar un aviso y borrar en
+modo real. Estas son las versiones que pasan:
+
+| qBittorrent | Imagen probada |
+|---|---|
+| 5.3 | `5.3.0-2` |
+| 5.1 | `5.1.4-2` |
+
+Hace falta qBittorrent 5.0 o posterior: la 4.6 no vale, porque su API aún
+no tiene `torrents/stop` ni `torrents/start` y semillero no podría parar
+ni reanudar (a mano o con la pausa automática). Otras versiones de la rama
+5 deberían valer, pero no se prueban. Para probar la tuya, mira
+`tools/e2e/qbittorrent.sh` y `crates/semillero/tests/integracion/real.rs`.
+
 ## Configuración
 
 Todo va por variables de entorno. Todas son opcionales: sin ninguna,

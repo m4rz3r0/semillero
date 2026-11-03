@@ -1,12 +1,9 @@
 # shellcheck shell=sh
 #
-# Clon del repositorio que sigue al remoto por etiquetas. Se carga con «.»;
-# solo usa git, grep y sort, así que el actualizador lo manda tal cual, como
-# texto, a la jail de compilación (el host nunca ejecuta nada del clon).
-#
-# Nunca hace merge: el clon se pone en la etiqueta con checkout --detach, así
-# que da igual que el remoto haya reescrito su historial (etiquetas borradas
-# o movidas).
+# Última etiqueta del repositorio, sin clon: se lee la salida de
+# «git ls-remote --tags» (la lista que da el servidor git), que no trae
+# nada ni ejecuta nada del repositorio. Se carga con «.»; solo usa grep, sed
+# y sort. La usa el actualizador en el host (deploy/freebsd/actualizar.sh).
 #
 # Solo cuentan las etiquetas vX.Y.Z; la elegida es la más alta según sort -V,
 # la misma que ultima_version (deploy/lib/precompiladas.sh) en el PC.
@@ -16,32 +13,38 @@ _etiquetas_version()
 	grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1
 }
 
-# Trae ramas y etiquetas de origin al clon $1: --force acepta etiquetas
-# movidas y --prune/--prune-tags borran las que el remoto ya no tiene.
-traer_referencias()
+# Lee por la entrada estándar la salida de git ls-remote --tags y escribe
+# «vX.Y.Z <commit>» de la última etiqueta vX.Y.Z. El commit es el de la línea
+# «refs/tags/vX.Y.Z^{}» si la hay (etiqueta anotada: la otra línea es el
+# objeto etiqueta, no el commit) y si no, el de «refs/tags/vX.Y.Z» (etiqueta
+# ligera). Sin ninguna etiqueta vX.Y.Z no escribe nada. Las líneas que no
+# son «<40 cifras hex> refs/tags/…» no cuentan.
+ultima_etiqueta_ls_remote()
 {
-	git -C "$1" fetch --quiet --force --prune --prune-tags --tags origin
-}
-
-# Trae las referencias, pone el clon $1 en la última etiqueta vX.Y.Z y la
-# escribe en la salida estándar. Sin ninguna no escribe nada ni cambia el
-# clon. Sale con error si no se puede traer o sacar.
-traer_ultima_etiqueta()
-{
-	traer_referencias "$1" || return 1
-	_etiqueta=$(git -C "$1" tag -l 'v*' | _etiquetas_version)
-	if [ -z "$_etiqueta" ]; then
-		return 0
+	_lista=$(sed -n 's/^\([0-9a-f]\{40\}\)[[:space:]]\{1,\}refs\/tags\/\([^[:space:]]*\)$/\1 \2/p')
+	_etiqueta=$(printf '%s\n' "$_lista" | sed -n 's/^[0-9a-f]* //p' | _etiquetas_version)
+	[ -n "$_etiqueta" ] || return 0
+	# Los puntos de la etiqueta, literales en las expresiones de sed.
+	_re=$(printf '%s' "$_etiqueta" | sed 's/\./\\./g')
+	_commit=$(printf '%s\n' "$_lista" | sed -n "s/^\([0-9a-f]*\) $_re^{}\$/\1/p" | head -n 1)
+	if [ -z "$_commit" ]; then
+		_commit=$(printf '%s\n' "$_lista" | sed -n "s/^\([0-9a-f]*\) $_re\$/\1/p" | head -n 1)
 	fi
-	git -C "$1" -c advice.detachedHead=false checkout --quiet --force --detach \
-		"refs/tags/$_etiqueta" || return 1
-	echo "$_etiqueta"
+	echo "$_etiqueta $_commit"
 }
 
-# La última etiqueta vX.Y.Z del remoto $1 sin traer nada ni tocar el clon
-# (para --comprobar).
-ultima_etiqueta_remota()
+# ¿Se llega al repositorio $1 por ssh? ssh://…, git+ssh://…, ssh+git://… o
+# [usuario@]equipo:ruta (la forma corta, como scp: dos puntos antes de la
+# primera barra). No lo son https://…, file://… ni una ruta local.
+repo_por_ssh()
 {
-	_lista=$(git ls-remote --tags --refs "$1" 'v*') || return 1
-	printf '%s\n' "$_lista" | sed -n 's|^[0-9a-f]*[[:space:]]*refs/tags/||p' | _etiquetas_version
+	case $1 in
+	ssh://* | git+ssh://* | ssh+git://*) return 0 ;;
+	*://* | /* | ./* | ../*) return 1 ;;
+	esac
+	_antes=${1%%:*}
+	[ "$_antes" != "$1" ] || return 1
+	case $_antes in
+	'' | */*) return 1 ;;
+	esac
 }

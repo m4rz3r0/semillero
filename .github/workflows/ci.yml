@@ -1,6 +1,10 @@
 # Comprobaciones de cada push y pull request: formato, clippy, pruebas, la
-# parte del navegador (wasm), que compila en Windows, los guiones de deploy/,
-# tools/ y packaging/, el escáner de datos privados y cargo-deny.
+# parte del navegador (wasm), los guiones de deploy/, tools/ y packaging/, el
+# escáner de datos privados y cargo-deny. En Windows, todas las pruebas de
+# Rust y la guía (docs/instalar/windows.md) con el binario y la web
+# compilados como en release.yml: «semillero configurar» con las respuestas
+# por la entrada estándar, el arranque con --env y con semillero.cmd, y que
+# /salud y la portada contestan en 127.0.0.1 (tools/ci/windows-arranque.ps1).
 #
 # Las acciones de terceros van fijadas por commit (con su versión al lado);
 # para subirlas, git ls-remote https://github.com/<dueño>/<acción> refs/tags/<versión>
@@ -47,21 +51,66 @@ jobs:
           --target wasm32-unknown-unknown --no-default-features --features hydrate
           -- -D warnings
 
-  windows:
-    name: Compila en Windows
-    runs-on: windows-2025
-    timeout-minutes: 60
+  web:
+    name: Web para Windows (cargo-leptos)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      LEPTOS_OUTPUT_NAME: semillero
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Rust de rust-toolchain.toml
-        shell: bash
         run: rustup toolchain install && rustup show active-toolchain
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - name: cargo check del servidor
+      # Como en release.yml: la web no depende del sistema y sale de Linux,
+      # con su versión de cargo-leptos.
+      - name: Web (cargo-leptos)
+        run: |
+          v=$(sed -n 's/^  CARGO_LEPTOS_VERSION: *//p' .github/workflows/release.yml)
+          test -n "$v"
+          cargo install --locked cargo-leptos --version "$v"
+          cargo leptos build --release --precompress
+          test -f target/site/hash.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web
+          path: target/site/
+          if-no-files-found: error
+          retention-days: 1
+
+  windows:
+    name: Windows (pruebas, configurar y arranque)
+    needs: web
+    runs-on: windows-2025
+    timeout-minutes: 90
+    defaults:
+      run:
         shell: bash
-        run: cargo check -p semillero --bin semillero --locked --no-default-features --features ssr
+    env:
+      LEPTOS_OUTPUT_NAME: semillero
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust de rust-toolchain.toml
+        run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Pruebas
+        run: cargo test --workspace --locked --features semillero/ssr
+      - name: Binario (cargo, como en release.yml)
+        env:
+          # Sin depender de que el equipo tenga el runtime de Visual C++.
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: cargo build --release --locked -p semillero --bin semillero --no-default-features --features ssr
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: web
+          path: web
+      - name: configurar, arranque y web en 127.0.0.1 (docs/instalar/windows.md)
+        shell: pwsh
+        run: ./tools/ci/windows-arranque.ps1 -Binario target/release/semillero.exe -Web web
 
   guiones:
     name: Guiones (deploy, tools, packaging)

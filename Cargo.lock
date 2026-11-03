@@ -2177,7 +2177,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "semillero"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -2194,9 +2194,11 @@ dependencies = [
  "qbt",
  "qbt-sim",
  "reglas",
+ "reqwest",
  "rpassword",
  "serde",
  "serde_json",
+ "sha1",
  "sha2",
  "sqlx",
  "tempfile",

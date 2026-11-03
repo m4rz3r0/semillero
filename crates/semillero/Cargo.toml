@@ -1,6 +1,6 @@
 [package]
 name = "semillero"
-version = "0.4.1"
+version = "0.5.0"
 description = "Web (Leptos + Axum) para cuidar los torrents de qBittorrent sin arriesgar un H&R"
 edition.workspace = true
 rust-version.workspace = true
@@ -68,6 +68,10 @@ tokio.workspace = true
 serde_json.workspace = true
 # Cuerpo por trozos (sin longitud) en la prueba del límite de tamaño.
 futures-util = { version = "0.3", default-features = false }
+# La prueba con un qBittorrent de verdad (`real`): su API sin pasar por
+# semillero y el hash de las piezas del torrent que crea.
+reqwest.workspace = true
+sha1 = "0.10"
 
 [features]
 hydrate = [

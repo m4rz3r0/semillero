@@ -107,6 +107,25 @@ The install guides are in Spanish. Their commands work as they are.
 
 Replace `X.Y.Z` with the version.
 
+### qBittorrent versions that pass
+
+CI tests every change end to end against a real qBittorrent (the official
+`qbittorrentofficial/qbittorrent-nox` image, in a container): sign in,
+classify, warn, cancel a warning and delete in real mode. These are the
+versions that pass:
+
+| qBittorrent | Image tested |
+|---|---|
+| 5.3 | `5.3.0-2` |
+| 5.1 | `5.1.4-2` |
+
+qBittorrent 5.0 or later is required: 4.6 does not work, because its API
+does not have `torrents/stop` and `torrents/start` yet and semillero could
+not stop or resume (by hand or with the automatic pause). Other 5.x
+releases should work, but are not tested. To test yours, see
+`tools/e2e/qbittorrent.sh` and
+`crates/semillero/tests/integracion/real.rs`.
+
 ## Configuration
 
 Everything is set with environment variables. All are optional: with none,

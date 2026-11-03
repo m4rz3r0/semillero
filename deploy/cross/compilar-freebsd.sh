@@ -1,29 +1,30 @@
 #!/usr/bin/env bash
-# Compila semillero para FreeBSD (x86_64-unknown-freebsd) en el PC de
-# compilación, un Linux con rustup, podman y cross, y lo empaqueta para el
-# buzón del servidor (deploy/freebsd/recibir-precompilada.sh). Así el
-# servidor no tiene que compilar (compilar Rust pide mucha memoria): su
-# actualizador instala lo que llega (deploy/README.md).
+# Compila semillero para FreeBSD (x86_64-unknown-freebsd) en el PC, un Linux
+# con rustup, podman y cross, y lo empaqueta como lo espera el actualizador
+# del servidor. Así el servidor no tiene que compilar (compilar Rust pide
+# mucha memoria): su actualizador instala la release de Forgejo que publica
+# con esto deploy/cross/publicar-forgejo.sh desde el runner de Forgejo
+# Actions del PC (deploy/README.md).
 #
-#   compilar-freebsd.sh --release vX.Y.Z [--bundle FICHERO] [--repo URL] [--entregar DESTINO]
-#   compilar-freebsd.sh --ultima --repo URL [--entregar DESTINO]
+#   compilar-freebsd.sh --release vX.Y.Z [--bundle FICHERO] [--repo URL]
 #   compilar-freebsd.sh --prueba [REF] [--bundle FICHERO]
 #
 # --release   compila la etiqueta vX.Y.Z (tiene que ser una etiqueta, no una
 #             rama ni un commit, y la versión de crates/semillero/Cargo.toml
 #             en ese commit) y deja en salida/X.Y.Z/ el paquete
 #             semillero-X.Y.Z-x86_64-unknown-freebsd.tar.gz y su SHA256SUMS.
-# --ultima    trae las etiquetas de --repo y compila la vX.Y.Z más reciente
-#             (sort -V, como el actualizador) si aún no se ha entregado;
-#             para el temporizador opcional (semillero-cross.timer).
 # --prueba    compila REF (por defecto HEAD del bundle o del clon) para probar
 #             la compilación: la versión se llama prueba-<sha corto> y el
-#             buzón no la admite.
-# --bundle    un `git bundle` que trae la referencia (lo manda lanzar.sh desde
-#             el equipo de trabajo); sin él, el clon tiene que tenerla ya.
-# --repo      URL de git de la que traer las etiquetas.
-# --entregar  al terminar una versión, la sube al buzón con entregar.sh
-#             (DESTINO: el usuario del buzón, p. ej. smentrega@servidor).
+#             servidor no la admite.
+# --bundle    un `git bundle` que trae la referencia (git bundle create … --all
+#             desde una copia del repositorio); sin él, el clon tiene que
+#             tenerla ya.
+# --repo      URL de git de la que traer las etiquetas (publicar-forgejo.sh
+#             pasa la de Forgejo, con el token en GIT_CONFIG_COUNT,
+#             GIT_CONFIG_KEY_0 y GIT_CONFIG_VALUE_0: en el entorno, nunca en
+#             la URL). Esas tres variables se quitan del entorno en cuanto
+#             se traen las etiquetas: la compilación (cargo, build.rs de las
+#             dependencias) no las ve.
 #
 # Todo vive en SEMILLERO_CROSS_DIR (por defecto ~/semillero-cross): repo/
 # (clon desnudo), fuente/ (el código de la referencia, con target/ dentro
@@ -66,7 +67,6 @@ modo=
 ref=
 bundle=
 repo_url=
-entregar=
 while [ "$#" -gt 0 ]; do
 	case $1 in
 	--release)
@@ -74,10 +74,6 @@ while [ "$#" -gt 0 ]; do
 		ref=${2:-}
 		[ -n "$ref" ] || uso
 		shift 2
-		;;
-	--ultima)
-		modo=ultima
-		shift
 		;;
 	--prueba)
 		modo=prueba
@@ -97,23 +93,12 @@ while [ "$#" -gt 0 ]; do
 		[ -n "$repo_url" ] || uso
 		shift 2
 		;;
-	--entregar)
-		entregar=${2:-}
-		[ -n "$entregar" ] || uso
-		shift 2
-		;;
 	*) uso ;;
 	esac
 done
 [ -n "$modo" ] || uso
 if [ -n "$bundle" ]; then
 	bundle=$(realpath -e "$bundle") || error "no existe el bundle"
-fi
-if [ "$modo" = ultima ] && [ -z "$repo_url" ]; then
-	error "--ultima necesita --repo"
-fi
-if [ "$modo" = prueba ] && [ -n "$entregar" ]; then
-	error "las compilaciones de --prueba no se entregan"
 fi
 
 for orden in git cross cargo rustup podman file sha256sum tar gzip rsync flock timeout; do
@@ -143,18 +128,9 @@ if [ -n "$repo_url" ]; then
 	git -C "$REPO" fetch --quiet --force --prune --prune-tags "$repo_url" '+refs/tags/*:refs/tags/*' ||
 		error "no se pueden traer las etiquetas del repositorio"
 fi
-if [ "$modo" = ultima ]; then
-	ref=$(git -C "$REPO" tag -l 'v*' | ultima_version)
-	[ -n "$ref" ] || {
-		echo "no hay ninguna etiqueta vX.Y.Z"
-		exit 0
-	}
-	if [ -f "$BASE/salida/${ref#v}/.entregada" ]; then
-		echo "$ref ya está compilada y entregada"
-		exit 0
-	fi
-	modo=release
-fi
+# La cabecera con el token (si la hay) solo hacía falta para traer las
+# etiquetas: nada de lo que sigue la ve.
+unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
 
 if [ "$modo" = release ]; then
 	case $ref in
@@ -258,6 +234,3 @@ tar --sort=name --format=gnu --owner=0 --group=0 --numeric-owner \
 	gzip -n -9 >"$SALIDA/$NOMBRE.tar.gz"
 (cd "$SALIDA" && LC_ALL=C sha256sum -- "$NOMBRE.tar.gz" >SHA256SUMS)
 echo "$SALIDA/$NOMBRE.tar.gz"
-if [ -n "$entregar" ]; then
-	bash "$AQUI/entregar.sh" --destino "$entregar" "$SALIDA"
-fi

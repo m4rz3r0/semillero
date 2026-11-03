@@ -40,6 +40,12 @@ de FreeBSD, systemd y Windows solo se han seguido a mano.
   web contesta en `127.0.0.1`.
 - **Versiones de qBittorrent**: probar contra las ramas 4.6 y 5.x y decir en
   el README cuáles valen.
+- **Actualizar desde la versión anterior**: arrancar la última versión
+  publicada con su configuración y su base de datos, cambiar al binario
+  nuevo sin tocar nada y comprobar que arranca y no pierde datos.
+- **Avisos del actualizador** que quedaron de la 0.4: el motivo de una
+  descarga fallida, un fallo de `gh` que no es un rechazo y el segundo
+  intento tras fallar la compilación.
 
 ## 0.6: más de un tracker
 
@@ -51,6 +57,8 @@ estrictas.
   por defecto para los que no encajan.
 - Los presets guardan las normas de cada tracker; un preset de la 0.3 sigue
   cargando como el juego por defecto.
+- **Añadir torrents desde semillero**: subir un `.torrent` o pegar un enlace
+  magnet, con su categoría, sin pasar por la WebUI de qBittorrent.
 
 ## 1.0: estable
 
