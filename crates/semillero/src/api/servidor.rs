@@ -116,13 +116,16 @@ async fn armar_portada(
     let qbt_ok = lista.is_ok();
     let qbt_clave_mala = matches!(lista, Err(qbt::Error::CuentaRechazada));
     let lista = lista.unwrap_or_default();
-    let normas = db::normas(db).await?;
+    let juego = db::juego_normas(db).await?;
+    let vistos = db::trackers_vistos(db).await?;
     let reglas_cat = db::reglas(db).await?;
     let avisos = db::avisos(db).await?;
     let exenciones = db::exenciones(db).await?;
 
     let mut torrents = Vec::with_capacity(lista.len());
     for t in &lista {
+        let tracker = tarea::host_de(t, &vistos);
+        let normas = *juego.para(tracker);
         let c = reglas::clasificar(&tarea::torrent_de_reglas(db, t).await?, &normas);
         torrents.push(FichaTorrent {
             hash: t.hash.clone(),
@@ -144,6 +147,8 @@ async fn armar_portada(
                 v.sort();
                 v
             },
+            tracker: tracker.to_owned(),
+            normas,
         });
     }
     torrents.sort_by_key(|t| t.nombre.to_lowercase());
@@ -194,7 +199,7 @@ async fn armar_portada(
 
     Ok(DatosPortada {
         ahora,
-        normas,
+        normas: juego.defecto,
         franja: Franja {
             vigilada: red.vigilada,
             vpn: red.vpn,
@@ -249,9 +254,11 @@ pub(super) async fn quitar(
             StatusCode::NOT_FOUND,
             "Ese torrent ya no está en qBittorrent.",
         ),
-        Err(NoQuitado::Protegido(c)) => {
+        Err(NoQuitado::Protegido(tarea::Proteccion {
+            clasificacion: c,
+            normas: n,
+        })) => {
             use crate::ui::formato::{cifra, falta};
-            let n = db::normas(&state.db).await.or_else(interno)?;
             let msg = match c.estado {
                 Estado::Obligado => format!(
                     "No se puede quitar: está recién sembrado y {} para los {} días.",
@@ -327,16 +334,20 @@ pub(super) async fn pagina_reglas() -> Result<DatosReglas, ServerFnError> {
             nombre: neutro.nombre,
             descripcion: neutro.descripcion,
             incluido: true,
+            trackers: neutro.trackers.len(),
         }];
         presets.extend(db::presets(db).await?.into_iter().map(|f| FichaPreset {
             id: f.id,
             nombre: f.nombre,
             descripcion: f.descripcion,
             incluido: false,
+            trackers: f.trackers,
         }));
+        let juego = db::juego_normas(db).await?;
         Ok::<_, sqlx::Error>(DatosReglas {
             modo_real: db::modo(db).await? == Modo::BorradoReal,
-            normas: db::normas(db).await?,
+            trackers: fichas_trackers(&state, &juego).await?,
+            normas: juego.defecto,
             tarjetas,
             exenciones,
             presets,
@@ -344,6 +355,52 @@ pub(super) async fn pagina_reglas() -> Result<DatosReglas, ServerFnError> {
     }
     .await;
     r.or_else(interno)
+}
+
+/// Los trackers de la página de reglas: los de los torrents de ahora (con
+/// cuántos tiene cada uno) y los que tienen normas propias, por host. Si
+/// qBittorrent no contesta, los últimos vistos.
+async fn fichas_trackers(
+    state: &AppState,
+    juego: &reglas::JuegoNormas,
+) -> Result<Vec<FichaTracker>, sqlx::Error> {
+    let vistos = db::trackers_vistos(&state.db).await?;
+    let mut cuantos: std::collections::BTreeMap<String, usize> = Default::default();
+    match state.qbt.torrents().await {
+        Ok(lista) => {
+            for t in &lista {
+                let host = tarea::host_de(t, &vistos);
+                if !host.is_empty() {
+                    *cuantos.entry(host.to_owned()).or_default() += 1;
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!("reglas sin torrents: {e}");
+            for host in vistos.values() {
+                *cuantos.entry(host.clone()).or_default() += 1;
+            }
+        }
+    }
+    for host in juego.trackers.keys() {
+        cuantos.entry(host.clone()).or_default();
+    }
+    Ok(cuantos
+        .into_iter()
+        .map(|(host, torrents)| {
+            let propias = juego.trackers.get(&host).copied();
+            let usa = propias
+                .is_none()
+                .then(|| juego.tracker_de(&host).map(str::to_owned))
+                .flatten();
+            FichaTracker {
+                host,
+                torrents,
+                propias,
+                usa,
+            }
+        })
+        .collect())
 }
 
 pub(super) async fn guardar_reglas(
@@ -376,6 +433,55 @@ pub(super) async fn guardar_normas(
     db::guardar_normas(&state.db, &normas)
         .await
         .or_else(interno)
+}
+
+/// El host de un tracker tal como llega de la interfaz: tiene que estar ya
+/// en su forma de guardar.
+fn host_bueno(tracker: &str) -> Result<(), ServerFnError> {
+    if reglas::trackers::normalizar_host(tracker).as_deref() == Some(tracker) {
+        Ok(())
+    } else {
+        fallar(StatusCode::BAD_REQUEST, "Ese tracker no vale.")
+    }
+}
+
+pub(super) async fn guardar_normas_tracker(
+    tracker: String,
+    normas: NormasTracker,
+    clave: Option<String>,
+) -> Result<(), ServerFnError> {
+    let state = app_state()?;
+    host_bueno(&tracker)?;
+    if let Err(msg) = normas.validar() {
+        return fallar(StatusCode::BAD_REQUEST, msg);
+    }
+    let ya = db::normas_trackers(&state.db).await.or_else(interno)?;
+    if !ya.contains_key(&tracker) && ya.len() >= preset::MAX_TRACKERS {
+        return fallar(
+            StatusCode::CONFLICT,
+            &format!(
+                "Ya hay {} trackers con normas propias: quita alguno antes.",
+                preset::MAX_TRACKERS
+            ),
+        );
+    }
+    exigir_contrasena_si_borrado_real(&state, clave).await?;
+    db::guardar_normas_tracker(&state.db, &tracker, &normas)
+        .await
+        .or_else(interno)
+}
+
+pub(super) async fn quitar_normas_tracker(
+    tracker: String,
+    clave: Option<String>,
+) -> Result<(), ServerFnError> {
+    let state = app_state()?;
+    host_bueno(&tracker)?;
+    exigir_contrasena_si_borrado_real(&state, clave).await?;
+    db::quitar_normas_tracker(&state.db, &tracker)
+        .await
+        .or_else(interno)
+        .map(|_| ())
 }
 
 pub(super) async fn cambiar_modo(real: bool, clave: Option<String>) -> Result<(), ServerFnError> {
@@ -429,8 +535,8 @@ fn es_repetido(e: &sqlx::Error) -> bool {
         .is_some_and(|d| d.is_unique_violation())
 }
 
-/// Las normas y las reglas de ahora como un preset (sin las categorías con
-/// todo apagado).
+/// Las normas (las de por defecto y las de cada tracker) y las reglas de
+/// ahora como un preset (sin las categorías con todo apagado).
 async fn configuracion_actual(
     db: &sqlx::SqlitePool,
     nombre: String,
@@ -446,6 +552,7 @@ async fn configuracion_actual(
         descripcion,
         normas: db::normas(db).await?,
         categorias,
+        trackers: db::normas_trackers(db).await?,
     })
 }
 
@@ -654,6 +761,7 @@ fn suceso(e: Evento) -> Suceso {
         Evento::ExencionQuitada => Suceso::ExencionQuitada,
         Evento::ModoCambiado => Suceso::ModoCambiado,
         Evento::PresetAplicado => Suceso::PresetAplicado,
+        Evento::Anadido => Suceso::Anadido,
     }
 }
 
@@ -678,4 +786,201 @@ pub(super) async fn historial() -> Result<DatosHistorial, ServerFnError> {
         ahora: ahora_unix(),
         lineas,
     })
+}
+
+// ---------------------------------------------------------------- añadir
+
+pub(super) async fn pagina_anadir() -> Result<DatosAnadir, ServerFnError> {
+    // También aquí: la página las pide al pintarse en el servidor.
+    sesion().await?;
+    let state = app_state()?;
+    match state.qbt.categorias().await {
+        Ok(categorias) => Ok(DatosAnadir { categorias }),
+        Err(e) => {
+            tracing::warn!("sin las categorías de qBittorrent: {e}");
+            fallar(
+                StatusCode::BAD_GATEWAY,
+                "qBittorrent no contesta. Prueba de nuevo en un momento.",
+            )
+        }
+    }
+}
+
+/// El nombre de un archivo subido, para los mensajes: sin carpetas.
+fn nombre_subido(nombre: &str) -> String {
+    let base = nombre.rsplit(['/', '\\']).next().unwrap_or_default();
+    let n = super::anadir::limpio(base);
+    if n.is_empty() {
+        "(sin nombre)".to_owned()
+    } else {
+        n
+    }
+}
+
+fn demasiado_grande<T>(nombre: &str) -> Result<T, ServerFnError> {
+    fallar(
+        StatusCode::PAYLOAD_TOO_LARGE,
+        &format!(
+            "El archivo «{nombre}» pasa de {} MiB: no se ha añadido nada.",
+            MAX_BYTES_TORRENT / (1024 * 1024)
+        ),
+    )
+}
+
+pub(super) async fn anadir_torrents(
+    archivos: Vec<ArchivoSubido>,
+    magnets: String,
+    categoria: String,
+) -> Result<ResultadoAnadir, ServerFnError> {
+    use base64::Engine;
+    use base64::engine::general_purpose::STANDARD;
+
+    let state = app_state()?;
+    // Primero, cuánto: antes de leer nada.
+    if archivos.len() > MAX_ARCHIVOS {
+        return fallar(
+            StatusCode::BAD_REQUEST,
+            &format!("Como mucho {MAX_ARCHIVOS} archivos .torrent de una vez."),
+        );
+    }
+    if magnets.len() > MAX_MAGNETS * MAX_BYTES_MAGNET {
+        return fallar(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "Hay demasiado texto en los enlaces magnet.",
+        );
+    }
+    let lineas: Vec<(usize, &str)> = magnets
+        .lines()
+        .enumerate()
+        .map(|(i, l)| (i + 1, l.trim()))
+        .filter(|(_, l)| !l.is_empty())
+        .collect();
+    if lineas.len() > MAX_MAGNETS {
+        return fallar(
+            StatusCode::BAD_REQUEST,
+            &format!("Como mucho {MAX_MAGNETS} enlaces magnet de una vez."),
+        );
+    }
+    if archivos.is_empty() && lineas.is_empty() {
+        return fallar(
+            StatusCode::BAD_REQUEST,
+            "Elige un archivo .torrent o pega un enlace magnet.",
+        );
+    }
+
+    // Después, si vale cada uno. Si alguno no, no se añade ninguno.
+    let mut problemas = Vec::new();
+    let mut a_qbt = Vec::with_capacity(archivos.len());
+    let mut apuntes = Vec::new();
+    for a in &archivos {
+        let nombre = nombre_subido(&a.nombre);
+        if a.datos.len() > largo_base64(MAX_BYTES_TORRENT) {
+            return demasiado_grande(&nombre);
+        }
+        let Ok(datos) = STANDARD.decode(a.datos.trim()) else {
+            problemas.push(format!("El archivo «{nombre}» no se ha podido leer."));
+            continue;
+        };
+        if datos.len() > MAX_BYTES_TORRENT {
+            return demasiado_grande(&nombre);
+        }
+        match super::anadir::torrent(&datos) {
+            Some(t) => {
+                apuntes.push((t.hash, t.nombre.unwrap_or_else(|| nombre.clone())));
+                a_qbt.push(qbt::ArchivoTorrent {
+                    nombre: nombre.clone(),
+                    datos,
+                });
+            }
+            None => problemas.push(format!("El archivo «{nombre}» no es un archivo .torrent.")),
+        }
+    }
+    let mut enlaces = Vec::with_capacity(lineas.len());
+    let mut nombres_magnet = Vec::with_capacity(lineas.len());
+    for (n, linea) in lineas {
+        match super::anadir::magnet(linea, n) {
+            Ok(m) => {
+                apuntes.push((m.hash, m.nombre.clone()));
+                nombres_magnet.push(m.nombre);
+                enlaces.push(m.enlace);
+            }
+            Err(p) => problemas.push(p),
+        }
+    }
+    if !problemas.is_empty() {
+        return fallar(
+            StatusCode::BAD_REQUEST,
+            &format!("No se ha añadido nada. {}", problemas.join(" ")),
+        );
+    }
+
+    let categoria = categoria.trim();
+    if !categoria.is_empty() {
+        match state.qbt.categorias().await {
+            Ok(cs) if cs.iter().any(|c| c == categoria) => {}
+            Ok(_) => {
+                return fallar(
+                    StatusCode::BAD_REQUEST,
+                    &format!(
+                        "La categoría «{}» no está en qBittorrent: no se ha añadido nada.",
+                        super::anadir::limpio(categoria)
+                    ),
+                );
+            }
+            Err(e) => {
+                tracing::warn!("sin las categorías de qBittorrent: {e}");
+                return fallar(
+                    StatusCode::BAD_GATEWAY,
+                    "qBittorrent no contesta: no se ha añadido nada. Prueba de nuevo en un momento.",
+                );
+            }
+        }
+    }
+
+    let categoria = (!categoria.is_empty()).then_some(categoria);
+    match state.qbt.anadir(&a_qbt, &enlaces, categoria).await {
+        Ok(()) => {}
+        Err(qbt::Error::NoAnadido) => {
+            return fallar(
+                StatusCode::BAD_GATEWAY,
+                "qBittorrent no lo ha añadido: puede que ya lo tuviera o que algún archivo esté \
+                 dañado. Mira la lista antes de repetirlo.",
+            );
+        }
+        Err(e) => {
+            tracing::warn!("qBittorrent no añadió los torrents: {e}");
+            return fallar(
+                StatusCode::BAD_GATEWAY,
+                "qBittorrent no contestó bien. Mira si están en la lista antes de repetirlo.",
+            );
+        }
+    }
+    tracing::info!(
+        archivos = a_qbt.len(),
+        magnets = enlaces.len(),
+        "torrents añadidos a mano"
+    );
+
+    // Ya están en qBittorrent: un fallo al apuntarlos no lo deshace.
+    let detalle = match categoria {
+        Some(c) => format!("Añadido desde semillero con la categoría «{c}»"),
+        None => "Añadido desde semillero, sin categoría".to_owned(),
+    };
+    let ahora = ahora_unix();
+    for (hash, nombre) in apuntes {
+        let apunte = db::Apunte {
+            ts: ahora,
+            hash,
+            nombre,
+            evento: Evento::Anadido,
+            regla: None,
+            detalle: detalle.clone(),
+        };
+        if let Err(e) = db::apuntar(&state.db, &apunte).await {
+            tracing::error!(hash = %apunte.hash, "añadido SIN APUNTAR en el historial: {e}");
+        }
+    }
+    let mut anadidos: Vec<String> = a_qbt.into_iter().map(|a| a.nombre).collect();
+    anadidos.extend(nombres_magnet);
+    Ok(ResultadoAnadir { anadidos })
 }

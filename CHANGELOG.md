@@ -3,6 +3,48 @@
 Lo que cambia en cada versión publicada. Lo que viene después, en
 [ROADMAP.md](ROADMAP.md).
 
+## 0.6.0
+
+Al actualizar no hay que hacer nada: la base de datos se migra sola al
+arrancar (migración 0005, que solo añade tablas) y las normas que tenías
+pasan a ser las de por defecto. Los presets de antes cargan igual. Lo que no
+se puede es volver atrás: una 0.5 no abre una base de datos que ya pasó por
+la 0.6, ni importa un preset con normas por tracker (formato 2).
+
+- **Normas por tracker.** Cada torrent sigue las normas de su tracker,
+  elegidas por el anuncio: vale el nombre del servidor o cualquier dominio
+  suyo (`ejemplo.example` vale para `tracker.ejemplo.example`), y gana el más
+  concreto. Los que no encajan con ninguno usan las de por defecto. En
+  «Reglas» salen los trackers de tus torrents, cuántos tiene cada uno y
+  «Usar normas propias»; en la ficha de cada torrent, su tracker.
+  - semillero guarda y enseña solo el nombre del servidor, nunca la
+    dirección del anuncio, que lleva tu passkey.
+  - Recuerda el último tracker de cada torrent: si qBittorrent deja de
+    darlo, el torrent sigue con las normas que tenía en vez de pasar a las
+    de por defecto.
+  - Con borrado real, cambiar o quitar las normas de un tracker pide la
+    contraseña, como las de por defecto.
+- **Presets con normas por tracker.** Un preset que las tiene se guarda en
+  el formato 2 (`[trackers."ejemplo.example"]`, con las mismas claves que
+  `[normas]`); uno sin ellas, en el formato 1 de siempre, que una 0.5 sigue
+  importando. Aplicar un preset cambia todo, también las normas de cada
+  tracker: uno del formato 1 las quita, y la confirmación dice cuántas.
+- **Añadir torrents desde semillero**, en la página nueva «Añadir»: sube
+  archivos `.torrent` o pega enlaces magnet (uno por línea), con una de las
+  categorías de qBittorrent. Como mucho 10 archivos de 4 MiB y 50 enlaces
+  de una vez. No acepta direcciones `http://` ni `https://` (qBittorrent
+  las descargaría desde dentro de tu red). Si alguno no vale no se añade
+  ninguno, y el error dice cuál sin repetir el enlace. Queda en el
+  historial como «Añadido».
+- Seguridad: sin sesión, `/api` se rechaza antes de leer el cuerpo de la
+  petición.
+- En móviles estrechos la cabecera pasa a dos filas: arriba el nombre y
+  los botones, debajo las secciones.
+- La prueba de punta a punta con un qBittorrent de verdad añade un torrent
+  desde semillero, con un tracker de prueba en `127.0.0.1`, y comprueba que
+  le tocan las normas de su tracker. Su contenedor usa ahora la red del
+  equipo, con la WebUI y BitTorrent escuchando solo en `127.0.0.1`.
+
 ## 0.5.0
 
 El programa, la base de datos, los presets y la configuración de semillero

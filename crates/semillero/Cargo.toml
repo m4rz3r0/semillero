@@ -1,6 +1,6 @@
 [package]
 name = "semillero"
-version = "0.5.0"
+version = "0.6.0"
 description = "Web (Leptos + Axum) para cuidar los torrents de qBittorrent sin arriesgar un H&R"
 edition.workspace = true
 rust-version.workspace = true
@@ -33,6 +33,9 @@ serde_json = { workspace = true, optional = true }
 qbt = { path = "../qbt", optional = true }
 jellyfin = { path = "../jellyfin", optional = true }
 sha2 = { workspace = true, optional = true }
+# El hash (SHA-1 de `info`) de un `.torrent` añadido, para el historial.
+sha1 = { version = "0.10", optional = true }
+# Servidor y navegador: el contenido de un `.torrent` al añadirlo.
 base64 = { workspace = true, optional = true }
 getrandom = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
@@ -80,6 +83,7 @@ hydrate = [
     "dep:console_error_panic_hook",
     "dep:web-sys",
     "dep:wasm-bindgen-futures",
+    "dep:base64",
 ]
 ssr = [
     "dep:leptos_axum",
@@ -90,6 +94,7 @@ ssr = [
     "dep:qbt",
     "dep:jellyfin",
     "dep:sha2",
+    "dep:sha1",
     "dep:base64",
     "dep:getrandom",
     "dep:tracing",

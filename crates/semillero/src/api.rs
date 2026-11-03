@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 use crate::cliente::ClienteCsrf;
 
 #[cfg(feature = "ssr")]
+mod anadir;
+#[cfg(feature = "ssr")]
 mod servidor;
 
 #[cfg(feature = "ssr")]
@@ -34,6 +36,20 @@ pub const ID_INCLUIDO: i64 = 0;
 
 /// Presets guardados como mucho.
 pub const MAX_PRESETS: i64 = 50;
+
+/// Tamaño máximo de un archivo `.torrent` al añadirlo (4 MiB).
+pub const MAX_BYTES_TORRENT: usize = 4 * 1024 * 1024;
+/// Archivos `.torrent` que se añaden de una vez, como mucho.
+pub const MAX_ARCHIVOS: usize = 10;
+/// Enlaces magnet que se añaden de una vez, como mucho.
+pub const MAX_MAGNETS: usize = 50;
+/// Tamaño máximo de un enlace magnet (con todos sus trackers).
+pub const MAX_BYTES_MAGNET: usize = 8 * 1024;
+
+/// Lo que ocupa en base64 un archivo de `n` bytes.
+pub const fn largo_base64(n: usize) -> usize {
+    n.div_ceil(3) * 4
+}
 
 /// Categorías con su tarjeta de reglas, en orden: código y nombre.
 pub const CATEGORIAS: [(&str, &str); 3] = [
@@ -116,6 +132,11 @@ pub struct FichaTorrent {
     pub aviso: Option<TipoRegla>,
     /// Reglas con «No recoger» para este torrent (ya no lo recogen).
     pub exenciones: Vec<TipoRegla>,
+    /// Host de su tracker (el último visto si ahora no contesta); vacío si
+    /// no se sabe.
+    pub tracker: String,
+    /// Sus normas: las de su tracker o las de por defecto.
+    pub normas: NormasTracker,
 }
 
 /// Espacio libre del disco de una categoría.
@@ -195,13 +216,32 @@ pub struct FichaPreset {
     pub descripcion: String,
     /// El incluido: se aplica y se descarga, pero no se cambia ni se elimina.
     pub incluido: bool,
+    /// Trackers con normas propias en el preset.
+    pub trackers: usize,
+}
+
+/// Un tracker en la página de reglas: uno que semillero ve en los torrents
+/// o uno con normas propias.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FichaTracker {
+    pub host: String,
+    /// Torrents de este tracker ahora.
+    pub torrents: usize,
+    /// Sus normas propias; `None`: usa otras.
+    pub propias: Option<NormasTracker>,
+    /// Sin normas propias, el tracker padre cuyas normas usa (`None`: las
+    /// de por defecto).
+    pub usa: Option<String>,
 }
 
 /// La página de reglas.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DatosReglas {
     pub modo_real: bool,
+    /// Las de por defecto.
     pub normas: NormasTracker,
+    /// Por host.
+    pub trackers: Vec<FichaTracker>,
     pub tarjetas: Vec<TarjetaReglas>,
     pub exenciones: Vec<FichaExencion>,
     /// El incluido primero; luego los guardados, por nombre.
@@ -221,6 +261,7 @@ pub enum Suceso {
     ExencionQuitada,
     ModoCambiado,
     PresetAplicado,
+    Anadido,
 }
 
 impl Suceso {
@@ -236,6 +277,7 @@ impl Suceso {
             Suceso::ExencionQuitada => "Vuelve a contar",
             Suceso::ModoCambiado => "Cambio de modo",
             Suceso::PresetAplicado => "Preset aplicado",
+            Suceso::Anadido => "Añadido",
         }
     }
 }
@@ -256,6 +298,28 @@ pub struct LineaHistorial {
 pub struct DatosHistorial {
     pub ahora: i64,
     pub lineas: Vec<LineaHistorial>,
+}
+
+/// Un archivo `.torrent` elegido en el navegador, con su contenido en
+/// base64.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArchivoSubido {
+    pub nombre: String,
+    pub datos: String,
+}
+
+/// La página de añadir torrents.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DatosAnadir {
+    /// Las categorías de qBittorrent, en orden.
+    pub categorias: Vec<String>,
+}
+
+/// Lo que se añadió: el nombre de cada archivo y el de cada enlace (su
+/// `dn` o, si no lo trae, su hash).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResultadoAnadir {
+    pub anadidos: Vec<String>,
 }
 
 /// Nombre de una regla para la interfaz.
@@ -345,6 +409,28 @@ pub async fn guardar_normas(
     servidor::guardar_normas(normas, clave).await
 }
 
+/// Guarda las normas propias del tracker `tracker` (un host), con las mismas
+/// comprobaciones y la misma contraseña que [`guardar_normas`].
+#[server(endpoint = "guardar_normas_tracker", input = Json, client = ClienteCsrf)]
+pub async fn guardar_normas_tracker(
+    tracker: String,
+    normas: NormasTracker,
+    clave: Option<String>,
+) -> Result<(), ServerFnError> {
+    servidor::guardar_normas_tracker(tracker, normas, clave).await
+}
+
+/// Quita las normas propias del tracker `tracker`: vuelve a usar las de por
+/// defecto. Con el borrado real activado pide la contraseña, como
+/// [`guardar_normas`].
+#[server(endpoint = "quitar_normas_tracker", input = Json, client = ClienteCsrf)]
+pub async fn quitar_normas_tracker(
+    tracker: String,
+    clave: Option<String>,
+) -> Result<(), ServerFnError> {
+    servidor::quitar_normas_tracker(tracker, clave).await
+}
+
 /// Guarda las normas y las reglas de ahora como un preset nuevo.
 #[server(endpoint = "guardar_preset", input = Json, client = ClienteCsrf)]
 pub async fn guardar_preset(nombre: String, descripcion: String) -> Result<(), ServerFnError> {
@@ -370,7 +456,8 @@ pub async fn cambiar_preset(
     servidor::cambiar_preset(id, nombre, descripcion, sobrescribir).await
 }
 
-/// Aplica un preset: sus normas y sus reglas sustituyen a las de ahora.
+/// Aplica un preset: sus normas (las de por defecto y las de cada tracker)
+/// y sus reglas sustituyen a las de ahora.
 /// Con el borrado real activado pide la contraseña escrita hace menos de 5
 /// minutos (o `clave`), como activarlo.
 #[server(endpoint = "aplicar_preset", input = Json, client = ClienteCsrf)]
@@ -395,4 +482,24 @@ pub async fn cambiar_modo(real: bool, clave: Option<String>) -> Result<(), Serve
 #[server(endpoint = "historial", input = Json, client = ClienteCsrf)]
 pub async fn historial() -> Result<DatosHistorial, ServerFnError> {
     servidor::historial().await
+}
+
+/// Datos de la página de añadir torrents: las categorías de qBittorrent.
+#[server(endpoint = "anadir", input = Json, client = ClienteCsrf)]
+pub async fn pagina_anadir() -> Result<DatosAnadir, ServerFnError> {
+    servidor::pagina_anadir().await
+}
+
+/// Añade a qBittorrent los `archivos` `.torrent` y los enlaces de
+/// `magnets` (uno por línea), con la `categoria` (vacía: sin categoría).
+/// Si alguno no vale, no se añade ninguno y el error dice cuál. Nunca
+/// acepta direcciones web: qBittorrent las descargaría desde dentro de la
+/// red.
+#[server(endpoint = "anadir_torrents", input = Json, client = ClienteCsrf)]
+pub async fn anadir_torrents(
+    archivos: Vec<ArchivoSubido>,
+    magnets: String,
+    categoria: String,
+) -> Result<ResultadoAnadir, ServerFnError> {
+    servidor::anadir_torrents(archivos, magnets, categoria).await
 }

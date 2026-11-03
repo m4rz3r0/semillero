@@ -1,15 +1,17 @@
 //! Base de datos SQLite: apertura con migraciones y accesos con tipos.
 //!
 //! Las sesiones y el freno del login están en [`crate::auth`]; aquí, lo que
-//! usa la tarea horaria y la interfaz: modo, normas del tracker, reglas,
-//! presets, avisos, exenciones, historial y muestras de subida.
+//! usa la tarea horaria y la interfaz: modo, normas del tracker (las de por
+//! defecto y las de cada tracker), reglas, presets, avisos, exenciones,
+//! historial, muestras de subida y el último tracker visto de cada torrent.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use std::time::Duration;
 
 use reglas::preset::Preset;
-use reglas::{Aviso, NormasTracker, ReglasCategoria, TipoRegla};
+use reglas::trackers::normalizar_host;
+use reglas::{Aviso, JuegoNormas, NormasTracker, ReglasCategoria, TipoRegla};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{SqliteExecutor, SqlitePool};
 
@@ -132,9 +134,14 @@ pub async fn normas(db: impl SqliteExecutor<'_>) -> Result<NormasTracker, sqlx::
     )
     .fetch_optional(db)
     .await?;
-    let Some((umbral_pct, siembra, ratio_min, plazo, ratio_pausa, aviso)) = fila else {
+    let Some(fila) = fila else {
         return Ok(NormasTracker::default());
     };
+    normas_de_fila(fila)
+}
+
+fn normas_de_fila(fila: FilaNormas) -> Result<NormasTracker, sqlx::Error> {
+    let (umbral_pct, siembra, ratio_min, plazo, ratio_pausa, aviso) = fila;
     let entero = |v: i64| {
         u32::try_from(v).map_err(|_| sqlx::Error::Decode("normas: entero fuera de rango".into()))
     };
@@ -174,6 +181,127 @@ pub async fn guardar_normas(
     .bind(i64::from(n.aviso_horas))
     .execute(db)
     .await?;
+    Ok(())
+}
+
+/// Las normas propias de cada tracker, por host.
+pub async fn normas_trackers(
+    db: impl SqliteExecutor<'_>,
+) -> Result<BTreeMap<String, NormasTracker>, sqlx::Error> {
+    let filas: Vec<(String, f64, i64, f64, i64, f64, i64)> = sqlx::query_as(
+        "SELECT host, umbral_pct, siembra_dias, ratio_min, plazo_largo_dias, ratio_pausa,
+                aviso_horas
+         FROM normas_tracker ORDER BY host",
+    )
+    .fetch_all(db)
+    .await?;
+    filas
+        .into_iter()
+        .map(|(host, a, b, c, d, e, f)| Ok((host, normas_de_fila((a, b, c, d, e, f))?)))
+        .collect()
+}
+
+/// Las normas por defecto y las de cada tracker.
+pub async fn juego_normas(db: &SqlitePool) -> Result<JuegoNormas, sqlx::Error> {
+    Ok(JuegoNormas {
+        defecto: normas(db).await?,
+        trackers: normas_trackers(db).await?,
+    })
+}
+
+/// Guarda las normas propias del tracker `host` (ya en su forma de guardar,
+/// ver [`normalizar_host`]). Fuera de rango o con un host que no vale,
+/// error y nada cambia.
+pub async fn guardar_normas_tracker(
+    db: impl SqliteExecutor<'_>,
+    host: &str,
+    n: &NormasTracker,
+) -> Result<(), sqlx::Error> {
+    if normalizar_host(host).as_deref() != Some(host) {
+        return Err(fuera_de_rango("host de tracker"));
+    }
+    n.validar().map_err(fuera_de_rango)?;
+    sqlx::query(
+        "INSERT INTO normas_tracker
+           (host, umbral_pct, siembra_dias, ratio_min, plazo_largo_dias, ratio_pausa, aviso_horas)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (host) DO UPDATE SET
+           umbral_pct = excluded.umbral_pct, siembra_dias = excluded.siembra_dias,
+           ratio_min = excluded.ratio_min, plazo_largo_dias = excluded.plazo_largo_dias,
+           ratio_pausa = excluded.ratio_pausa, aviso_horas = excluded.aviso_horas",
+    )
+    .bind(host)
+    .bind(n.umbral_pct)
+    .bind(i64::from(n.siembra_dias))
+    .bind(n.ratio_min)
+    .bind(i64::from(n.plazo_largo_dias))
+    .bind(n.ratio_pausa)
+    .bind(i64::from(n.aviso_horas))
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// Quita las normas propias del tracker `host`: vuelve a las de por
+/// defecto. Devuelve si las tenía.
+pub async fn quitar_normas_tracker(
+    db: impl SqliteExecutor<'_>,
+    host: &str,
+) -> Result<bool, sqlx::Error> {
+    let r = sqlx::query("DELETE FROM normas_tracker WHERE host = ?")
+        .bind(host)
+        .execute(db)
+        .await?;
+    Ok(r.rows_affected() > 0)
+}
+
+/// Apunta que los torrents `presentes` (hash y host del tracker, vacío si
+/// qBittorrent no da ninguno) están en qBittorrent a la hora `ahora`. Con
+/// host, se recuerda; sin él, se queda el último que se vio.
+pub async fn recordar_trackers(
+    db: &SqlitePool,
+    presentes: &[(&str, &str)],
+    ahora: i64,
+) -> Result<(), sqlx::Error> {
+    let mut tx = db.begin().await?;
+    for (hash, host) in presentes {
+        let host = normalizar_host(host).unwrap_or_default();
+        if host.is_empty() {
+            sqlx::query("UPDATE trackers_vistos SET visto = ? WHERE hash = ?")
+                .bind(ahora)
+                .bind(hash)
+                .execute(&mut *tx)
+                .await?;
+        } else {
+            sqlx::query(
+                "INSERT INTO trackers_vistos (hash, host, visto) VALUES (?, ?, ?)
+                 ON CONFLICT (hash) DO UPDATE SET host = excluded.host, visto = excluded.visto",
+            )
+            .bind(hash)
+            .bind(&host)
+            .bind(ahora)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+    tx.commit().await
+}
+
+/// El último host de tracker visto de cada torrent (por hash).
+pub async fn trackers_vistos(db: &SqlitePool) -> Result<HashMap<String, String>, sqlx::Error> {
+    let filas: Vec<(String, String)> = sqlx::query_as("SELECT hash, host FROM trackers_vistos")
+        .fetch_all(db)
+        .await?;
+    Ok(filas.into_iter().collect())
+}
+
+/// Olvida el tracker de los torrents que no se ven en qBittorrent desde
+/// antes de `antes_de` (los que están se apuntan en cada pasada).
+pub async fn olvidar_trackers(db: &SqlitePool, antes_de: i64) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM trackers_vistos WHERE visto < ?")
+        .bind(antes_de)
+        .execute(db)
+        .await?;
     Ok(())
 }
 
@@ -235,20 +363,23 @@ pub struct FilaPreset {
     pub id: i64,
     pub nombre: String,
     pub descripcion: String,
+    /// Trackers con normas propias en el preset.
+    pub trackers: usize,
 }
 
 /// Los presets guardados, por nombre.
 pub async fn presets(db: &SqlitePool) -> Result<Vec<FilaPreset>, sqlx::Error> {
-    let filas: Vec<(i64, String, String)> =
-        sqlx::query_as("SELECT id, nombre, descripcion FROM presets ORDER BY nombre, id")
+    let filas: Vec<(i64, String, String, String)> =
+        sqlx::query_as("SELECT id, nombre, descripcion, archivo FROM presets ORDER BY nombre, id")
             .fetch_all(db)
             .await?;
     Ok(filas
         .into_iter()
-        .map(|(id, nombre, descripcion)| FilaPreset {
+        .map(|(id, nombre, descripcion, archivo)| FilaPreset {
             id,
             nombre,
             descripcion,
+            trackers: Preset::leer(&archivo).map_or(0, |p| p.trackers.len()),
         })
         .collect())
 }
@@ -319,16 +450,34 @@ pub async fn borrar_preset(db: &SqlitePool, id: i64) -> Result<bool, sqlx::Error
     Ok(r.rows_affected() > 0)
 }
 
-/// Aplica un preset: sus normas y sus reglas sustituyen a las de ahora (las
-/// categorías que no trae quedan con todo apagado) y se apunta en el
-/// historial, todo en una transacción.
+/// Aplica un preset: sus normas, las de sus trackers y sus reglas
+/// sustituyen a las de ahora (las categorías que no trae quedan con todo
+/// apagado y los trackers que no trae, con las normas por defecto) y se
+/// apunta en el historial, todo en una transacción.
 pub async fn aplicar_preset(db: &SqlitePool, p: &Preset, ahora: i64) -> Result<(), sqlx::Error> {
     p.validar().map_err(|e| fuera_de_rango(&e))?;
     let mut tx = db.begin().await?;
     guardar_normas(&mut *tx, &p.normas).await?;
+    let quitadas = sqlx::query("DELETE FROM normas_tracker")
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    for (host, n) in &p.trackers {
+        guardar_normas_tracker(&mut *tx, host, n).await?;
+    }
     sqlx::query("DELETE FROM reglas").execute(&mut *tx).await?;
     for (cat, r) in &p.categorias {
         guardar_reglas(&mut *tx, cat, r).await?;
+    }
+    let mut detalle = format!(
+        "Preset «{}» aplicado: normas del tracker y reglas nuevas",
+        p.nombre
+    );
+    if quitadas > 0 || !p.trackers.is_empty() {
+        detalle.push_str(&format!(
+            "; normas propias para {} (antes, {quitadas})",
+            trackers_en_palabras(p.trackers.len())
+        ));
     }
     apuntar(
         &mut *tx,
@@ -338,14 +487,20 @@ pub async fn aplicar_preset(db: &SqlitePool, p: &Preset, ahora: i64) -> Result<(
             nombre: String::new(),
             evento: Evento::PresetAplicado,
             regla: None,
-            detalle: format!(
-                "Preset «{}» aplicado: normas del tracker y reglas nuevas",
-                p.nombre
-            ),
+            detalle,
         },
     )
     .await?;
     tx.commit().await
+}
+
+/// «1 tracker», «3 trackers», «ningún tracker».
+pub fn trackers_en_palabras(n: usize) -> String {
+    match n {
+        0 => "ningún tracker".into(),
+        1 => "1 tracker".into(),
+        n => format!("{n} trackers"),
+    }
 }
 
 pub async fn avisos(db: &SqlitePool) -> Result<Vec<Aviso>, sqlx::Error> {
@@ -461,6 +616,8 @@ pub enum Evento {
     ModoCambiado,
     /// Se aplicó un preset: normas y reglas nuevas.
     PresetAplicado,
+    /// Añadido a qBittorrent desde semillero.
+    Anadido,
 }
 
 impl Evento {
@@ -476,6 +633,7 @@ impl Evento {
             Evento::ExencionQuitada => "exencion_quitada",
             Evento::ModoCambiado => "modo_cambiado",
             Evento::PresetAplicado => "preset_aplicado",
+            Evento::Anadido => "anadido",
         }
     }
 
@@ -491,6 +649,7 @@ impl Evento {
             "exencion_quitada" => Evento::ExencionQuitada,
             "modo_cambiado" => Evento::ModoCambiado,
             "preset_aplicado" => Evento::PresetAplicado,
+            "anadido" => Evento::Anadido,
             otro => {
                 return Err(sqlx::Error::Decode(
                     format!("evento desconocido: {otro}").into(),

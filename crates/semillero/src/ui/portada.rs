@@ -432,6 +432,16 @@ fn siembra(t: &FichaTorrent) -> String {
     }
 }
 
+/// « Tracker ejemplo.example.» para los lectores de pantalla (nada si no se
+/// sabe).
+fn tracker_lector(t: &FichaTorrent) -> String {
+    if t.tracker.is_empty() {
+        String::new()
+    } else {
+        format!(" Tracker {}.", t.tracker)
+    }
+}
+
 /// «Ratio 1,80».
 fn ratio(t: &FichaTorrent) -> String {
     if t.ratio.is_finite() {
@@ -710,7 +720,7 @@ fn UnaMaceta(t: FichaTorrent, aviso: Option<FichaAviso>, j: Jardin, crecer: bool
             // El tiesto también abre la ficha con el ratón; con el teclado,
             // el nombre de la etiqueta.
             <div class="maceta-tiesto" on:click=move |_| abrir()>
-                <Maceta t=t.clone() normas=j.normas crecer />
+                <Maceta t=t.clone() normas=t.normas crecer />
             </div>
             // La etiqueta va clavada en una estaca delante de la maceta: el
             // nombre y una o dos líneas cortas; los datos, en la ficha (y
@@ -727,10 +737,10 @@ fn UnaMaceta(t: FichaTorrent, aviso: Option<FichaAviso>, j: Jardin, crecer: bool
                         <span class="nombre-texto">{nombre.clone()}</span>
                     </button>
                 </h3>
-                <p class="estado-planta">{estado_etiqueta(&t, &j.normas)}</p>
+                <p class="estado-planta">{estado_etiqueta(&t, &t.normas)}</p>
                 {pausa}
                 {texto_aviso.map(|a| view! { <p class="aviso-planta">{a}</p> })}
-                <p class="solo-lectores">{format!("{}. {}.", siembra(&t), ratio(&t))}</p>
+                <p class="solo-lectores">{format!("{}. {}.{}", siembra(&t), ratio(&t), tracker_lector(&t))}</p>
                 {botones}
             </div>
         </li>
@@ -879,6 +889,11 @@ fn ContenidoFicha(t: FichaTorrent, aviso: Option<FichaAviso>, j: Jardin) -> impl
         "sin datos".to_owned()
     };
     let donde = format!("{}, {}", t.categoria, bytes(t.tamano));
+    let tracker = if t.tracker.is_empty() {
+        "Sin datos".to_owned()
+    } else {
+        t.tracker.clone()
+    };
     let aviso_dato = aviso.as_ref().map(|a| {
         view! {
             <div class="ficha-dato ficha-aviso">
@@ -963,18 +978,19 @@ fn ContenidoFicha(t: FichaTorrent, aviso: Option<FichaAviso>, j: Jardin) -> impl
             <div class="pliego-planta">
                 <span class="cinta cinta-izquierda" aria-hidden="true"></span>
                 <span class="cinta cinta-derecha" aria-hidden="true"></span>
-                <Maceta t=t.clone() normas=j.normas />
+                <Maceta t=t.clone() normas=t.normas />
             </div>
             <div class="pliego-etiqueta">
                 <h2 id="ficha-titulo" class="ficha-nombre">
                     {nombre}
                 </h2>
                 <dl class="ficha-datos">
-                    {dato("Estado", estado_planta(&t, &j.normas))}
+                    {dato("Estado", estado_planta(&t, &t.normas))}
                     {dato("Siembra", siembra)}
                     {dato("Ratio", ratio)}
                     {dato("Ahora", ahora)}
                     {dato("Dónde", donde)}
+                    {dato("Tracker", tracker)}
                     {aviso_dato}
                 </dl>
                 {hay_exenciones.then(|| view! { <ul class="ficha-exenciones">{exenciones}</ul> })}

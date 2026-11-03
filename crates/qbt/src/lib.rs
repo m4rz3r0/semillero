@@ -22,6 +22,9 @@ use std::time::Duration;
 use reqwest::Client;
 use serde::Deserialize;
 
+mod anadir;
+pub use anadir::ArchivoTorrent;
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("qBittorrent no responde: {0}")]
@@ -34,6 +37,9 @@ pub enum Error {
     HashNoValido,
     #[error("qBittorrent no acepta el usuario y la contraseña de semillero")]
     CuentaRechazada,
+    /// `torrents/add` contestó «Fails.» (o 415): no añadió alguno.
+    #[error("qBittorrent no ha añadido los torrents")]
+    NoAnadido,
 }
 
 /// Usuario y contraseña con los que semillero entra en qBittorrent (modo
@@ -87,6 +93,77 @@ pub struct TorrentQbt {
     pub upspeed: i64,
     pub dlspeed: i64,
     pub progress: f64,
+    /// Host del tracker que funciona ahora (campo `tracker`); vacío si
+    /// qBittorrent no tiene ninguno que conteste. El anuncio entero lleva el
+    /// passkey del usuario: se lee directamente como host y nunca se guarda.
+    #[serde(default, deserialize_with = "leer_tracker")]
+    pub tracker: String,
+}
+
+/// Lee el campo `tracker` de `torrents/info` y se queda solo con el host.
+/// Nunca falla: algo que no es un anuncio con host queda vacío (y un error
+/// aquí podría repetir el anuncio en el mensaje).
+fn leer_tracker<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let v = Option::<serde_json::Value>::deserialize(d)?;
+    Ok(v.as_ref()
+        .and_then(serde_json::Value::as_str)
+        .map(host_del_anuncio)
+        .unwrap_or_default())
+}
+
+/// El host de un anuncio (`https://tracker.ejemplo.example:443/passkey/announce`
+/// → `tracker.ejemplo.example`): sin esquema, usuario, puerto ni ruta, en
+/// minúsculas. Una IP, como la escribe la librería estándar. Vacío si no es
+/// un anuncio con un host válido.
+pub fn host_del_anuncio(anuncio: &str) -> String {
+    let Some((esquema, resto)) = anuncio.trim().split_once("://") else {
+        return String::new();
+    };
+    let esquema_bueno = esquema.starts_with(|c: char| c.is_ascii_alphabetic())
+        && esquema
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c));
+    if !esquema_bueno {
+        return String::new();
+    }
+    let autoridad = resto
+        .split(['/', '\\', '?', '#'])
+        .next()
+        .unwrap_or_default();
+    let autoridad = autoridad.rsplit_once('@').map_or(autoridad, |(_, h)| h);
+    if let Some(r) = autoridad.strip_prefix('[') {
+        let Some((ip, tras)) = r.split_once(']') else {
+            return String::new();
+        };
+        if !(tras.is_empty() || tras.starts_with(':')) {
+            return String::new();
+        }
+        return ip
+            .parse::<std::net::Ipv6Addr>()
+            .map(|ip| ip.to_string())
+            .unwrap_or_default();
+    }
+    let host = autoridad.split_once(':').map_or(autoridad, |(h, _)| h);
+    let host = host.strip_suffix('.').unwrap_or(host);
+    if host.is_empty() || host.len() > 253 || !host.is_ascii() {
+        return String::new();
+    }
+    if let Ok(ip) = host.parse::<std::net::Ipv4Addr>() {
+        return ip.to_string();
+    }
+    let host = host.to_ascii_lowercase();
+    let etiqueta_buena = |e: &str| {
+        (1..=63).contains(&e.len())
+            && !e.starts_with('-')
+            && !e.ends_with('-')
+            && e.bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    };
+    if host.split('.').all(etiqueta_buena) {
+        host
+    } else {
+        String::new()
+    }
 }
 
 /// SHA-1 (v1) o SHA-256 (v2) en minúsculas: con `hashes` vacío o raro
@@ -350,5 +427,91 @@ impl Qbt {
             return Err(Error::Rechazado(estado.as_u16()));
         }
         Ok(cuerpo.trim() != "Fails.")
+    }
+}
+
+#[cfg(test)]
+mod pruebas {
+    use super::*;
+
+    const PASSKEY: &str = "abc123secreto";
+
+    #[test]
+    fn del_anuncio_solo_queda_el_host() {
+        for (url, host) in [
+            (
+                "https://tracker.ejemplo.example:443/abc123secreto/announce",
+                "tracker.ejemplo.example",
+            ),
+            (
+                "http://Tracker.Ejemplo.EXAMPLE/announce?passkey=abc123secreto",
+                "tracker.ejemplo.example",
+            ),
+            (
+                "udp://tracker.segundo.example:1337/announce",
+                "tracker.segundo.example",
+            ),
+            (
+                "https://usuario:abc123secreto@ejemplo.example/a",
+                "ejemplo.example",
+            ),
+            ("http://127.0.0.1:8080/announce", "127.0.0.1"),
+            ("http://[2001:DB8::1]:6969/announce", "2001:db8::1"),
+            ("https://ejemplo.example./announce", "ejemplo.example"),
+            ("https://ejemplo.example#abc123secreto", "ejemplo.example"),
+            // Como un navegador: `\` corta la autoridad igual que `/`.
+            (
+                "https://ejemplo.example\\@otro.example/announce",
+                "ejemplo.example",
+            ),
+        ] {
+            assert_eq!(host_del_anuncio(url), host, "{url}");
+        }
+        for malo in [
+            "",
+            "ejemplo.example/announce",
+            "https://",
+            "https:///announce",
+            "https://ejem plo.example/",
+            "https://ejémplo.example/",
+            "https://[ejemplo.example]/",
+            "://ejemplo.example/",
+        ] {
+            assert_eq!(host_del_anuncio(malo), "", "{malo:?}");
+        }
+    }
+
+    fn info(tracker: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "hash": "1111111111111111111111111111111111111111", "name": "Una",
+            "state": "uploading", "downloaded": 1, "total_size": 1, "uploaded": 1,
+            "seeding_time": 1, "ratio": 1.0, "added_on": 1, "save_path": "/m",
+            "upspeed": 0, "dlspeed": 0, "progress": 1.0, "tracker": tracker
+        })
+    }
+
+    #[test]
+    fn el_passkey_no_llega_al_torrent_ni_a_su_debug() {
+        let url = format!("https://tracker.ejemplo.example:443/{PASSKEY}/announce");
+        let t: TorrentQbt = serde_json::from_value(info(url.into())).unwrap();
+        assert_eq!(t.tracker, "tracker.ejemplo.example");
+        assert!(!format!("{t:?}").contains(PASSKEY));
+        assert!(!format!("{t:#?}").contains("announce"));
+    }
+
+    #[test]
+    fn sin_tracker_o_con_uno_raro_el_host_queda_vacio() {
+        let mut sin = info(serde_json::Value::Null);
+        sin.as_object_mut().unwrap().remove("tracker");
+        let t: TorrentQbt = serde_json::from_value(sin).unwrap();
+        assert_eq!(t.tracker, "");
+        for raro in [
+            serde_json::json!(""),
+            serde_json::json!(null),
+            serde_json::json!(7),
+        ] {
+            let t: TorrentQbt = serde_json::from_value(info(raro)).unwrap();
+            assert_eq!(t.tracker, "");
+        }
     }
 }

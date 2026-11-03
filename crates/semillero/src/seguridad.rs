@@ -25,6 +25,17 @@ pub const LIMITE_CUERPO: usize = 16 * 1024;
 pub const LIMITE_CUERPO_PRESET: usize = 2 * reglas::preset::MAX_BYTES + 4 * 1024;
 const RUTA_SUBIR_PRESET: &str = "/api/subir_preset";
 
+/// Añadir torrents lleva hasta [`MAX_ARCHIVOS`](crate::api::MAX_ARCHIVOS)
+/// `.torrent` de 4 MiB en base64 (con su nombre) y hasta
+/// [`MAX_MAGNETS`](crate::api::MAX_MAGNETS) enlaces magnet dentro de JSON
+/// (las comillas y los saltos de línea ocupan el doble). La server function
+/// vuelve a comprobar cada tamaño.
+pub const LIMITE_CUERPO_ANADIR: usize = crate::api::MAX_ARCHIVOS
+    * (crate::api::largo_base64(crate::api::MAX_BYTES_TORRENT) + 1024)
+    + 2 * crate::api::MAX_MAGNETS * crate::api::MAX_BYTES_MAGNET
+    + 4 * 1024;
+const RUTA_ANADIR: &str = "/api/anadir_torrents";
+
 /// Server functions a las que se llega sin sesión.
 const API_PUBLICA: [&str; 1] = ["/api/login"];
 
@@ -105,12 +116,13 @@ fn poner_cabeceras(mut resp: Response) -> Response {
 }
 
 /// Rechaza con 413 las peticiones de más de [`LIMITE_CUERPO`] bytes
-/// ([`LIMITE_CUERPO_PRESET`] en la subida de presets).
+/// ([`LIMITE_CUERPO_PRESET`] en la subida de presets y
+/// [`LIMITE_CUERPO_ANADIR`] al añadir torrents).
 pub async fn limitar_cuerpo(req: Request, next: Next) -> Response {
-    let limite = if req.uri().path() == RUTA_SUBIR_PRESET {
-        LIMITE_CUERPO_PRESET
-    } else {
-        LIMITE_CUERPO
+    let limite = match req.uri().path() {
+        RUTA_SUBIR_PRESET => LIMITE_CUERPO_PRESET,
+        RUTA_ANADIR => LIMITE_CUERPO_ANADIR,
+        _ => LIMITE_CUERPO,
     };
     let declarado = req
         .headers()

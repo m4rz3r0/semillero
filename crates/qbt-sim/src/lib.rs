@@ -7,12 +7,15 @@
 //! - Sin sesión ni lista blanca, el resto de la API contesta 403.
 //! - `torrents/info` (con `hashes`), `torrents/stop`,
 //!   `torrents/start` y `torrents/delete`.
+//! - `torrents/categories` y `torrents/add` (ver [`anadir`]).
+
+mod anadir;
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use axum::extract::{ConnectInfo, Form, Query, State};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, Form, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -64,6 +67,10 @@ struct Interior {
     /// Número de la última sesión abierta (no se repiten al olvidarlas).
     ultimo_sid: usize,
     relecturas: Vec<(String, Option<Value>)>,
+    /// Las de `torrents/categories`.
+    categorias: Vec<String>,
+    /// `torrents/add` contesta «Fails.» sin añadir nada.
+    fallar_al_anadir: bool,
 }
 
 struct Estado {
@@ -102,6 +109,16 @@ impl SimControl {
         self.0.baneado.store(si, Ordering::SeqCst);
     }
 
+    /// Las categorías que tiene qBittorrent.
+    pub fn fijar_categorias(&self, categorias: Vec<String>) {
+        self.0.interior.lock().unwrap().categorias = categorias;
+    }
+
+    /// Con `si`, `torrents/add` contesta «Fails.» y no añade nada.
+    pub fn fallar_al_anadir(&self, si: bool) {
+        self.0.interior.lock().unwrap().fallar_al_anadir = si;
+    }
+
     pub fn llamadas(&self) -> Vec<Llamada> {
         self.0.interior.lock().unwrap().llamadas.clone()
     }
@@ -126,6 +143,12 @@ pub async fn arrancar(conf: Conf) -> Sim {
         .route("/api/v2/torrents/stop", post(accion))
         .route("/api/v2/torrents/start", post(accion))
         .route("/api/v2/torrents/delete", post(accion))
+        .route("/api/v2/torrents/categories", get(anadir::categorias))
+        // Varios `.torrent` de hasta 4 MiB cada uno.
+        .route(
+            "/api/v2/torrents/add",
+            post(anadir::anadir).layer(DefaultBodyLimit::max(64 * 1024 * 1024)),
+        )
         .with_state(estado.clone());
     let oyente = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", oyente.local_addr().unwrap());

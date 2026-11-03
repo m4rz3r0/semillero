@@ -60,7 +60,8 @@ arrancar() {
     hash=$(hash_pbkdf2 "$clave")
     # La 4.6 lee la WebUI en [Preferences] y la 5.3 en [WebUI]: van las
     # dos. Sin DHT, LSD ni PeX: los torrents de la prueba no salen a
-    # ninguna red.
+    # ninguna red. Con la red del equipo (para llegar al tracker de mentira
+    # de la prueba en 127.0.0.1), la WebUI y BitTorrent solo escuchan ahí.
     cat >"$dir/config/qBittorrent/config/qBittorrent.conf" <<EOF
 [BitTorrent]
 Session\\DefaultSavePath=/downloads
@@ -69,6 +70,9 @@ Session\\DHTEnabled=false
 Session\\LSDEnabled=false
 Session\\PeXEnabled=false
 Session\\Port=6881
+Session\\Interface=lo
+Session\\InterfaceName=lo
+Session\\InterfaceAddress=127.0.0.1
 
 [LegalNotice]
 Accepted=true
@@ -76,8 +80,13 @@ Accepted=true
 [Meta]
 MigrationVersion=9999
 
+[Network]
+PortForwardingEnabled=false
+
 [Preferences]
+Connection\\UPnP=false
 WebUI\\Port=$puerto
+WebUI\\Address=127.0.0.1
 WebUI\\Username=admin
 WebUI\\Password_PBKDF2="$hash"
 WebUI\\LocalHostAuth=true
@@ -86,6 +95,7 @@ WebUI\\MaxAuthenticationFailCount=0
 
 [WebUI]
 Port=$puerto
+Address=127.0.0.1
 Username=admin
 Password_PBKDF2="$hash"
 LocalHostAuth=true
@@ -95,7 +105,7 @@ EOF
     "$CONTENEDOR" run -d --name "$NOMBRE" \
         -e QBT_LEGAL_NOTICE=confirm \
         -e "QBT_WEBUI_PORT=$puerto" \
-        -p "127.0.0.1:$puerto:$puerto" \
+        --network host \
         -v "$dir/config:/config:Z" \
         -v "$dir/datos:/downloads:Z" \
         "$imagen" >/dev/null

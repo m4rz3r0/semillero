@@ -46,13 +46,27 @@ The screenshots come from the demo, with the simulated qBittorrent (see
   that counts, seeding days, minimum ratio, maximum period, ratio to stop
   at, and warning hours. The starting values are those of a typical private
   tracker.
+- **Per-tracker rules**: if you use more than one tracker, each one can have
+  its own. semillero looks at the host of each torrent's announce URL (it
+  never stores or shows the whole URL, which carries your passkey); a
+  tracker without its own rules uses the default ones, and if the tracker
+  goes down, the torrent keeps the rules of the last host it was seen with.
 - **Deletion rules per category**: ratio, seeding time, inactivity and free
   disk space. They only apply to torrents that are done or do not count.
 - **Always warns first**: every automatic deletion first appears in «A punto
   de borrarse» (about to be deleted), with a countdown and a button to stop
   it.
 - **Shareable presets**: save your tracker rules and deletion rules to a
-  file, download it, upload it to another semillero and apply it.
+  file, download it, upload it to another semillero and apply it. Older
+  presets still work; one with per-tracker rules uses format 2, which only
+  semillero 0.6 or later reads (without them it is still saved as format 1).
+- **Add torrents without qBittorrent's web UI**: in «Añadir» (add), upload
+  `.torrent` files or paste magnet links (one per line) and pick one of
+  qBittorrent's categories. At most 10 files of 4 MiB and 50 links at a
+  time. Web addresses (`http://` or `https://`) are not accepted:
+  qBittorrent would fetch them from inside your network. If any item is
+  invalid, nothing is added, and the error names the failing line or file
+  without repeating the link (it may carry your tracker passkey).
 - **Real deletion behind a password**: at first it only warns. To make it
   really delete, you switch it on and it asks for your password.
 - **Jellyfin, optional**: after a deletion, it asks the media library to
@@ -184,6 +198,8 @@ fallos=<port renewals that failed in a row>
 - Sign-in throttle per client address, not per user.
 - Asks for the password again before real deletion and, while real deletion
   is on, before changing norms, rules or the preset.
+- Only a signed-in user can add torrents, and never from a web address:
+  only checked `.torrent` files and magnet links.
 - Does not show its version to the public.
 
 To use it from another machine, put it behind a reverse proxy with HTTPS:

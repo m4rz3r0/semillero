@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use qbt::TorrentQbt;
-use reglas::{Aviso, Disco, NormasTracker, ReglasCategoria, TipoRegla, Torrent};
+use reglas::{Aviso, Disco, JuegoNormas, NormasTracker, ReglasCategoria, TipoRegla, Torrent};
 use sqlx::SqlitePool;
 
 use crate::db::{self, Apunte, BorradoPedido, Evento, Modo};
@@ -117,6 +117,24 @@ fn motivo(r: TipoRegla) -> &'static str {
     crate::api::motivo_regla(r)
 }
 
+/// El host del tracker de `t`: el que da qBittorrent o, si no da ninguno
+/// (tracker caído), el último que se le vio (`vistos`, por hash).
+pub fn host_de<'a>(t: &'a TorrentQbt, vistos: &'a HashMap<String, String>) -> &'a str {
+    if t.tracker.is_empty() {
+        vistos.get(&t.hash).map_or("", String::as_str)
+    } else {
+        &t.tracker
+    }
+}
+
+/// Las normas de `t`: las de su tracker (ver [`host_de`]) o las de por
+/// defecto.
+pub async fn normas_de(db: &SqlitePool, t: &TorrentQbt) -> Result<NormasTracker, sqlx::Error> {
+    let juego = db::juego_normas(db).await?;
+    let vistos = db::trackers_vistos(db).await?;
+    Ok(*juego.para(host_de(t, &vistos)))
+}
+
 /// El torrent de qBittorrent como lo ven las reglas (con la última subida
 /// según las muestras).
 pub async fn torrent_de_reglas(db: &SqlitePool, t: &TorrentQbt) -> Result<Torrent, sqlx::Error> {
@@ -189,8 +207,22 @@ impl<M: Mediateca> Pasada<'_, M> {
         red: &EstadoRed,
         caido_s: i64,
     ) -> Result<(), sqlx::Error> {
-        let normas = db::normas(self.db()).await?;
         let reglas_cat = db::reglas(self.db()).await?;
+
+        // El tracker de cada torrent, y con él sus normas.
+        let presentes: Vec<(&str, &str)> = lista
+            .iter()
+            .map(|t| (t.hash.as_str(), t.tracker.as_str()))
+            .collect();
+        db::recordar_trackers(self.db(), &presentes, self.ahora).await?;
+        db::olvidar_trackers(self.db(), self.ahora - MUESTRAS_GRACIA_DIAS * 86_400).await?;
+        let juego = db::juego_normas(self.db()).await?;
+        let vistos = db::trackers_vistos(self.db()).await?;
+        let normas_de: HashMap<String, NormasTracker> = lista
+            .iter()
+            .map(|t| (t.hash.clone(), *juego.para(host_de(t, &vistos))))
+            .collect();
+        let normas = |h: &str| normas_de.get(h).unwrap_or(&juego.defecto);
 
         // Muestras de subida (para la inactividad).
         for t in lista {
@@ -219,7 +251,7 @@ impl<M: Mediateca> Pasada<'_, M> {
         let nombre = |h: &str| lista.iter().find(|t| t.hash == h).map(|t| t.name.clone());
 
         // Pausa: parar nunca borra.
-        let pausar = reglas::a_pausar(&torrents, &normas);
+        let pausar = reglas::a_pausar_con(&torrents, |t| normas(&t.hash));
         if !pausar.is_empty() {
             match self.estado.qbt.parar(&pausar).await {
                 Ok(()) => {
@@ -229,7 +261,7 @@ impl<M: Mediateca> Pasada<'_, M> {
                             nombre(h).as_deref(),
                             Evento::Pausado,
                             None,
-                            texto_pausa(&normas),
+                            texto_pausa(normas(h)),
                         )
                         .await?;
                     }
@@ -251,16 +283,16 @@ impl<M: Mediateca> Pasada<'_, M> {
         // Avisos.
         let discos = medir_discos(lista, &reglas_cat, medir);
         let exenciones = db::exenciones(self.db()).await?;
-        let cands = reglas::candidatos(
+        let cands = reglas::candidatos_con(
             &torrents,
-            &normas,
+            |t| normas(&t.hash),
             &reglas_cat,
             &discos,
             &exenciones,
             self.ahora,
         );
         let avisos = db::avisos(self.db()).await?;
-        let paso = reglas::avanzar(&avisos, &cands, self.ahora, caido_s, red.red_ok(), &normas);
+        let paso = reglas::avanzar_con(&avisos, &cands, self.ahora, caido_s, red.red_ok(), normas);
         // Primero lo que no depende de qBittorrent, por si la pasada se corta.
         // Vencidos y retirados se quedan guardados hasta apuntar su final.
         let guardar: Vec<Aviso> = paso
@@ -280,7 +312,7 @@ impl<M: Mediateca> Pasada<'_, M> {
                 Some(a.regla),
                 format!(
                     "Se borrará en {}: {}",
-                    horas(normas.aviso_horas),
+                    horas(normas(&a.hash).aviso_horas),
                     motivo(a.regla)
                 ),
             )
@@ -308,7 +340,9 @@ impl<M: Mediateca> Pasada<'_, M> {
             return Ok(());
         }
         for a in &paso.vencidos {
-            let fin = self.vencer(a, &normas, &reglas_cat, &discos).await;
+            let fin = self
+                .vencer(a, (&juego, &vistos), &reglas_cat, &discos)
+                .await;
             self.cerrar(a, fin).await;
         }
         Ok(())
@@ -461,7 +495,7 @@ impl<M: Mediateca> Pasada<'_, M> {
     async fn vencer(
         &mut self,
         a: &Aviso,
-        normas: &NormasTracker,
+        (juego, vistos): (&JuegoNormas, &HashMap<String, String>),
         reglas_cat: &HashMap<String, ReglasCategoria>,
         discos: &HashMap<String, Disco>,
     ) -> Result<Fin, sqlx::Error> {
@@ -490,6 +524,7 @@ impl<M: Mediateca> Pasada<'_, M> {
             }
         };
         let rt = self.a_reglas(&t).await?;
+        let normas = juego.para(host_de(&t, vistos));
         // Exenciones recién leídas: un «No borrar» de última hora cuenta. Y
         // solo vale la regla del aviso que se enseñó: las demás se dan por
         // exentas aquí, para que ninguna borre sin sus propias 24 horas.
@@ -604,6 +639,7 @@ fn torrent_minimo(hash: &str, nombre: Result<String, sqlx::Error>) -> TorrentQbt
         upspeed: 0,
         dlspeed: 0,
         progress: 0.0,
+        tracker: String::new(),
     }
 }
 
@@ -641,10 +677,18 @@ pub enum NoQuitado {
     HashMalo,
     /// Ya no está en qBittorrent.
     NoEsta,
-    /// Obligado o En espera: aún tiene que sembrar.
-    Protegido(reglas::Clasificacion),
+    /// Obligado o En espera: aún tiene que sembrar (según sus normas).
+    Protegido(Proteccion),
     Qbt(qbt::Error),
     Db(sqlx::Error),
+}
+
+/// Por qué un torrent aún no se puede quitar: su clasificación y las normas
+/// con que se clasificó (las de su tracker).
+#[derive(Debug)]
+pub struct Proteccion {
+    pub clasificacion: reglas::Clasificacion,
+    pub normas: NormasTracker,
 }
 
 impl From<sqlx::Error> for NoQuitado {
@@ -679,10 +723,13 @@ pub async fn quitar_a_mano<M: Mediateca>(
         Ok(None) => return Err(NoQuitado::NoEsta),
         Err(e) => return Err(NoQuitado::Qbt(e)),
     };
-    let normas = db::normas(db).await?;
+    let normas = normas_de(db, &t).await?;
     let c = reglas::clasificar(&torrent_de_reglas(db, &t).await?, &normas);
     if !c.borrable {
-        return Err(NoQuitado::Protegido(c));
+        return Err(NoQuitado::Protegido(Proteccion {
+            clasificacion: c,
+            normas,
+        }));
     }
     estado
         .qbt

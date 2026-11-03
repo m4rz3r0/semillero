@@ -1014,6 +1014,8 @@ fn el_dibujo_sale_de_los_datos() {
         tamano: 1000,
         aviso: None,
         exenciones: Vec::new(),
+        tracker: String::new(),
+        normas: reglas::NormasTracker::default(),
     };
     assert_eq!(
         trazos(&base, &reglas::NormasTracker::default()),

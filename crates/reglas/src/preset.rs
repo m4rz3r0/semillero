@@ -22,6 +22,24 @@
 //! disco_libre_pct = 10.0
 //! ```
 //!
+//! Con normas propias para algún tracker, el preset es del formato 2: el
+//! mismo, con `formato = 2` y una sección por tracker (su host) con las
+//! mismas claves que `[normas]`:
+//!
+//! ```toml
+//! [trackers."ejemplo.example"]
+//! umbral_pct = 10.0
+//! siembra_dias = 14
+//! ratio_min = 1.0
+//! plazo_largo_dias = 60
+//! ratio_pausa = 3.0
+//! aviso_horas = 48
+//! ```
+//!
+//! Un preset sin normas por tracker se escribe en el formato 1, que también
+//! entienden semillero 0.3 a 0.5; uno del formato 1 se lee con sus normas
+//! como las de por defecto y sin normas por tracker.
+//!
 //! Una regla que no está, está apagada; una categoría que no está, tiene
 //! todas apagadas. Todo se comprueba al leer: un archivo con algo de más, de
 //! menos o fuera de rango se rechaza entero con una frase que dice qué falla.
@@ -31,10 +49,15 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use toml::{Table, Value};
 
+use crate::trackers::normalizar_host;
 use crate::{NormasTracker, ReglasCategoria};
 
-/// La versión del formato que se lee y se escribe.
+/// El formato de los presets sin normas por tracker (semillero 0.3 y
+/// posteriores).
 pub const FORMATO: i64 = 1;
+/// El formato de los presets con normas por tracker (semillero 0.6 y
+/// posteriores).
+pub const FORMATO_TRACKERS: i64 = 2;
 /// Tamaño máximo de un archivo de preset, en bytes.
 pub const MAX_BYTES: usize = 64 * 1024;
 /// Caracteres como mucho en el nombre.
@@ -47,8 +70,18 @@ pub const MAX_CATEGORIAS: usize = 16;
 pub const MAX_CATEGORIA: usize = 32;
 /// Cómo se escribe en el archivo la categoría vacía (torrents sin categoría).
 pub const SIN_CATEGORIA: &str = "sin_categoria";
+/// Trackers con normas propias como mucho en un preset.
+pub const MAX_TRACKERS: usize = 32;
 
 const CLAVES: [&str; 5] = ["formato", "nombre", "descripcion", "normas", "categorias"];
+const CLAVES_2: [&str; 6] = [
+    "formato",
+    "nombre",
+    "descripcion",
+    "normas",
+    "categorias",
+    "trackers",
+];
 const CLAVES_NORMAS: [&str; 6] = [
     "umbral_pct",
     "siembra_dias",
@@ -65,13 +98,16 @@ const CLAVES_REGLAS: [&str; 4] = [
 ];
 
 /// Un preset. Las categorías van por su código de qBittorrent (`""` es sin
-/// categoría).
+/// categoría); `normas` son las de por defecto y `trackers`, las propias de
+/// cada tracker (por host, ver [`crate::trackers`]).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Preset {
     pub nombre: String,
     pub descripcion: String,
     pub normas: NormasTracker,
     pub categorias: BTreeMap<String, ReglasCategoria>,
+    #[serde(default)]
+    pub trackers: BTreeMap<String, NormasTracker>,
 }
 
 /// Comprueba un nombre de preset y lo devuelve sin espacios a los lados.
@@ -113,6 +149,7 @@ impl Preset {
                 .into(),
             normas: NormasTracker::default(),
             categorias: BTreeMap::new(),
+            trackers: BTreeMap::new(),
         }
     }
 
@@ -138,6 +175,15 @@ impl Preset {
             r.validar()
                 .map_err(|e| format!("Categoría «{}»: {e}", clave_de(cat)))?;
         }
+        if self.trackers.len() > MAX_TRACKERS {
+            return Err(demasiados_trackers(self.trackers.len()));
+        }
+        for (host, n) in &self.trackers {
+            if normalizar_host(host).as_deref() != Some(host.as_str()) {
+                return Err(host_malo(host));
+            }
+            n.validar().map_err(|e| format!("Tracker «{host}»: {e}"))?;
+        }
         Ok(())
     }
 
@@ -156,21 +202,33 @@ impl Preset {
             None => "El archivo no se puede leer como TOML.".to_owned(),
         })?;
 
-        match tabla.get("formato") {
+        let formato = match tabla.get("formato") {
             None => {
                 return Err(
                     "Falta «formato = 1» al principio: no parece un preset de semillero.".into(),
                 );
             }
-            Some(Value::Integer(FORMATO)) => {}
+            Some(Value::Integer(n @ (FORMATO | FORMATO_TRACKERS))) => *n,
             Some(Value::Integer(n)) => {
                 return Err(format!(
-                    "Este preset es del formato {n} y semillero solo entiende el formato {FORMATO}."
+                    "Este preset es del formato {n} y esta versión de semillero solo entiende \
+                     los formatos {FORMATO} y {FORMATO_TRACKERS}."
                 ));
             }
             Some(_) => return Err("«formato» tiene que ser un número: formato = 1.".into()),
+        };
+        if formato == FORMATO && tabla.contains_key("trackers") {
+            return Err(
+                "Las normas por tracker ([trackers.…]) van en presets del formato 2, que \
+                 entiende semillero 0.6 o posterior: cambia «formato = 1» por «formato = 2»."
+                    .into(),
+            );
         }
-        sobrantes(&tabla, &CLAVES, "")?;
+        if formato == FORMATO {
+            sobrantes(&tabla, &CLAVES, "")?;
+        } else {
+            sobrantes(&tabla, &CLAVES_2, "")?;
+        }
 
         let nombre = match tabla.get("nombre") {
             Some(Value::String(s)) => validar_nombre(s)?,
@@ -225,18 +283,38 @@ impl Preset {
             }
         }
 
+        let trackers = match tabla.get("trackers") {
+            None => BTreeMap::new(),
+            Some(Value::Table(t)) => leer_trackers(t)?,
+            Some(_) => {
+                return Err(
+                    "«trackers» tiene que ir en secciones: [trackers.\"ejemplo.example\"], …"
+                        .into(),
+                );
+            }
+        };
+        if formato == FORMATO_TRACKERS && trackers.is_empty() {
+            return Err(
+                "Un preset del formato 2 lleva normas por tracker ([trackers.…]); sin ellas, \
+                 escribe «formato = 1»."
+                    .into(),
+            );
+        }
+
         let p = Preset {
             nombre,
             descripcion,
             normas,
             categorias,
+            trackers,
         };
         p.validar()?;
         Ok(p)
     }
 
     /// El archivo del preset, listo para compartir. [`Preset::leer`] lo lee
-    /// tal cual.
+    /// tal cual. Sin normas por tracker, en el formato 1 (lo lee también
+    /// semillero 0.3 a 0.5); con ellas, en el 2.
     pub fn escribir(&self) -> String {
         #[derive(Serialize)]
         struct Archivo<'a> {
@@ -245,6 +323,8 @@ impl Preset {
             descripcion: &'a str,
             normas: &'a NormasTracker,
             categorias: BTreeMap<&'a str, Reglas>,
+            #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+            trackers: &'a BTreeMap<String, NormasTracker>,
         }
         #[derive(Serialize)]
         struct Reglas {
@@ -258,7 +338,11 @@ impl Preset {
             disco_libre_pct: Option<f64>,
         }
         let archivo = Archivo {
-            formato: FORMATO,
+            formato: if self.trackers.is_empty() {
+                FORMATO
+            } else {
+                FORMATO_TRACKERS
+            },
             nombre: &self.nombre,
             descripcion: &self.descripcion,
             normas: &self.normas,
@@ -277,6 +361,7 @@ impl Preset {
                     )
                 })
                 .collect(),
+            trackers: &self.trackers,
         };
         // Solo números, textos y tablas: no puede fallar.
         toml::to_string(&archivo).unwrap_or_default()
@@ -368,14 +453,54 @@ fn entero(v: &Value, nombre: &str) -> Result<u32, String> {
     }
 }
 
+fn demasiados_trackers(n: usize) -> String {
+    format!("Hay normas para {n} trackers y el máximo es {MAX_TRACKERS}.")
+}
+
+fn host_malo(clave: &str) -> String {
+    format!(
+        "«{}» no es un host de tracker: escribe solo el nombre, como \
+         [trackers.\"tracker.ejemplo.example\"], sin https://, puerto ni ruta.",
+        mostrar(clave)
+    )
+}
+
+fn leer_trackers(t: &Table) -> Result<BTreeMap<String, NormasTracker>, String> {
+    if t.len() > MAX_TRACKERS {
+        return Err(demasiados_trackers(t.len()));
+    }
+    let mut trackers = BTreeMap::new();
+    for (clave, v) in t {
+        let Value::Table(normas) = v else {
+            return Err(format!(
+                "«trackers.{0}» tiene que ser una sección: [trackers.\"{0}\"].",
+                mostrar(clave)
+            ));
+        };
+        let host = normalizar_host(clave).ok_or_else(|| host_malo(clave))?;
+        let n = leer_normas_de(normas, &format!("trackers.{host}"))?;
+        if trackers.insert(host.clone(), n).is_some() {
+            return Err(format!(
+                "El tracker «{host}» está repetido: sus normas van en una sola sección."
+            ));
+        }
+    }
+    Ok(trackers)
+}
+
 fn leer_normas(t: &Table) -> Result<NormasTracker, String> {
-    sobrantes(t, &CLAVES_NORMAS, "normas.")?;
+    leer_normas_de(t, "normas")
+}
+
+/// Las normas de la sección `seccion` («normas» o «trackers.ejemplo.example»).
+fn leer_normas_de(t: &Table, seccion: &str) -> Result<NormasTracker, String> {
+    sobrantes(t, &CLAVES_NORMAS, &format!("{seccion}."))?;
     let campo = |k: &str| {
         t.get(k)
-            .ok_or_else(|| format!("Falta «normas.{k}» en la sección [normas]."))
+            .ok_or_else(|| format!("Falta «{seccion}.{k}» en la sección [{seccion}]."))
     };
-    let num = |k: &str| numero(campo(k)?, &format!("normas.{k}"));
-    let ent = |k: &str| entero(campo(k)?, &format!("normas.{k}"));
+    let num = |k: &str| numero(campo(k)?, &format!("{seccion}.{k}"));
+    let ent = |k: &str| entero(campo(k)?, &format!("{seccion}.{k}"));
     Ok(NormasTracker {
         umbral_pct: num("umbral_pct")?,
         siembra_dias: ent("siembra_dias")?,

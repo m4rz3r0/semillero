@@ -2,6 +2,7 @@
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use futures_util::StreamExt;
 
 use crate::comun::*;
 
@@ -318,4 +319,24 @@ async fn sin_sesion_ninguna_variante_de_ruta_ensena_datos() {
     let cookie = sesion(&p).await;
     let html = texto(enviar(&p.app, get("/", Some(&cookie))).await).await;
     assert!(html.contains("NombreQueNoDebeVerse"));
+}
+
+/// Sin sesión, la subida de torrents (la ruta que más admite) se rechaza
+/// antes de leer el cuerpo: nadie de fuera hace que semillero guarde en
+/// memoria decenas de megas.
+#[tokio::test]
+async fn sin_sesion_no_se_lee_la_subida_de_torrents() {
+    let p = con_sim(qbt_sim::Conf::default()).await;
+    // Un trozo y luego nada: si alguien leyera el cuerpo entero, esperaría
+    // para siempre.
+    let trozos = futures_util::stream::iter([Ok::<_, std::io::Error>(vec![b'{'; 1024])])
+        .chain(futures_util::stream::pending());
+    let mut req = post("/api/anadir_torrents", "");
+    req.headers_mut()
+        .insert("content-type", "application/json".parse().unwrap());
+    *req.body_mut() = Body::from_stream(trozos);
+    let resp = tokio::time::timeout(std::time::Duration::from_secs(5), enviar(&p.app, req))
+        .await
+        .expect("sin sesión contesta sin leer el cuerpo");
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }

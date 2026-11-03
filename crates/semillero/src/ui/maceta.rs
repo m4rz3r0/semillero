@@ -526,6 +526,8 @@ pub fn GlifoPlanta(estado: Estado) -> impl IntoView {
         tamano: 0,
         aviso: None,
         exenciones: Vec::new(),
+        tracker: String::new(),
+        normas: NormasTracker::default(),
     };
     // Encuadre de cada planta: la semilla es pequeña y va más cerca.
     let caja = match estado {

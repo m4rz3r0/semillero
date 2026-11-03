@@ -75,11 +75,18 @@ mod servidor {
                 state.clone(),
                 seguridad::paginas,
             ))
+            // Lo que lee el cuerpo entero (las server functions) admite tanto
+            // como la ruta más grande; `limitar_cuerpo` ya puso el de cada una.
+            .layer(axum::extract::DefaultBodyLimit::max(
+                seguridad::LIMITE_CUERPO_ANADIR,
+            ))
+            .layer(middleware::from_fn(seguridad::limitar_cuerpo))
+            // El guardián solo mira las cabeceras: va antes de leer el
+            // cuerpo, para que sin sesión no se guarde en memoria una subida.
             .layer(middleware::from_fn_with_state(
                 state.clone(),
                 seguridad::guardian,
             ))
-            .layer(middleware::from_fn(seguridad::limitar_cuerpo))
             .layer(middleware::from_fn_with_state(
                 state.clone(),
                 seguridad::cabeceras,

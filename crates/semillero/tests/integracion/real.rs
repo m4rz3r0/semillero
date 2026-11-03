@@ -34,6 +34,10 @@ use sha1::{Digest, Sha1};
 use crate::comun::{self, Prueba};
 use crate::interfaz::Ui;
 
+/// Las pruebas que ponen torrents en qBittorrent van de una en una: cada
+/// una empieza quitando lo que dejó la anterior.
+static UNA_A_UNA: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Prefijo de los torrents de la prueba en qBittorrent.
 const PREFIJO: &str = "semillero-e2e-";
 const HORA: i64 = 3600;
@@ -274,6 +278,11 @@ fn hex(bytes: &[u8]) -> String {
 /// Un torrent de un fichero (privado: sin DHT ni PeX) con sus datos en
 /// `dir/nombre`; devuelve el `.torrent` y su hash.
 fn crear_torrent(dir: &Path, nombre: &str) -> (Vec<u8>, String) {
+    crear_torrent_con(dir, nombre, None)
+}
+
+/// [`crear_torrent`] con `anuncio` como tracker.
+fn crear_torrent_con(dir: &Path, nombre: &str, anuncio: Option<&str>) -> (Vec<u8>, String) {
     const PIEZA: usize = 16 * 1024;
     // 40 000 bytes que no se repiten de una prueba a otra (van con el nombre).
     let mut x: u32 = nombre
@@ -298,7 +307,11 @@ fn crear_torrent(dir: &Path, nombre: &str) -> (Vec<u8>, String) {
     info.extend_from_slice(&piezas);
     info.extend_from_slice(b"7:privatei1ee");
     let hash = hex(&Sha1::digest(&info));
-    let mut archivo = b"d4:info".to_vec();
+    // Bencode: «announce» va antes que «info».
+    let mut archivo = match anuncio {
+        Some(a) => format!("d8:announce{}:{a}4:info", a.len()).into_bytes(),
+        None => b"d4:info".to_vec(),
+    };
     archivo.extend_from_slice(&info);
     archivo.push(b'e');
     (archivo, hash)
@@ -387,6 +400,7 @@ async fn real_clasifica_avisa_cancela_y_borra() {
     let Some(r) = real("real_clasifica_avisa_cancela_y_borra") else {
         return;
     };
+    let _turno = UNA_A_UNA.lock().await;
     let qbt = Directo::entrar(&r).await;
     qbt.limpiar().await;
     let marca = format!("{PREFIJO}{}-{}", std::process::id(), ahora());
@@ -566,4 +580,132 @@ async fn real_clasifica_avisa_cancela_y_borra() {
     assert!(historial.contains(&nombre_a), "{historial}");
 
     qbt.borrar(std::slice::from_ref(&b)).await;
+}
+
+/// Un tracker de mentira en este equipo: contesta a cada anuncio sin pares y
+/// cuenta los anuncios.
+async fn tracker_de_prueba() -> (u16, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let anuncios = Arc::new(AtomicUsize::new(0));
+    let cuenta = anuncios.clone();
+    let app = axum::Router::new().route(
+        "/announce",
+        axum::routing::get(move || {
+            let cuenta = cuenta.clone();
+            async move {
+                cuenta.fetch_add(1, Ordering::SeqCst);
+                "d8:intervali60e5:peers0:e"
+            }
+        }),
+    );
+    let escucha = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let puerto = escucha.local_addr().unwrap().port();
+    tokio::spawn(async move { axum::serve(escucha, app).await.unwrap() });
+    (puerto, anuncios)
+}
+
+#[tokio::test]
+async fn real_anade_desde_semillero_con_las_normas_de_su_tracker() {
+    use base64::Engine;
+    use std::sync::atomic::Ordering;
+    let Some(r) = real("real_anade_desde_semillero_con_las_normas_de_su_tracker") else {
+        return;
+    };
+    let _turno = UNA_A_UNA.lock().await;
+    let qbt = Directo::entrar(&r).await;
+    qbt.limpiar().await;
+    let (puerto, anuncios) = tracker_de_prueba().await;
+    // El passkey va en el anuncio: semillero no debe enseñarlo ni guardarlo.
+    const PASSKEY: &str = "e2epasskey0no0se0ve";
+    let anuncio = format!("http://127.0.0.1:{puerto}/announce?passkey={PASSKEY}");
+    let nombre = format!("{PREFIJO}{}-{}-t.bin", std::process::id(), ahora());
+    let (archivo, hash) = crear_torrent_con(&r.datos, &nombre, Some(&anuncio));
+
+    let p = r.semillero().await;
+    let resp = comun::login(&p, &r.usuario, &r.clave).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let cookie = resp.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    let token = comun::token(&p, &cookie).await;
+    let u = Ui { p, cookie, token };
+
+    // Normas propias para el tracker, distintas de las de por defecto.
+    let propias = reglas::NormasTracker {
+        aviso_horas: 5,
+        siembra_dias: 3,
+        ..reglas::NormasTracker::POR_DEFECTO
+    };
+    let (s, cuerpo) = u
+        .llamar(
+            "/api/guardar_normas_tracker",
+            json!({ "tracker": "127.0.0.1", "normas": propias, "clave": null }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{cuerpo}");
+
+    // Añadir el .torrent desde semillero.
+    let datos = base64::engine::general_purpose::STANDARD.encode(&archivo);
+    let (s, cuerpo) = u
+        .llamar(
+            "/api/anadir_torrents",
+            json!({
+                "archivos": [{ "nombre": "prueba.torrent", "datos": datos }],
+                "magnets": "",
+                "categoria": "",
+            }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{cuerpo}");
+    assert!(!cuerpo.contains(PASSKEY), "{cuerpo}");
+    // qBittorrent da el tracker en cuanto lo tiene, aunque aún no lo haya
+    // contactado; la prueba espera además al primer anuncio.
+    esperar(
+        60,
+        "el torrent en qBittorrent, anunciado a su tracker",
+        || async {
+            anuncios.load(Ordering::SeqCst) > 0
+                && qbt
+                    .torrent(&hash)
+                    .await
+                    .is_some_and(|t| !t["tracker"].as_str().unwrap_or_default().is_empty())
+        },
+    )
+    .await;
+
+    // La portada: su tracker (solo el host) y sus normas.
+    let (s, cuerpo) = u.llamar("/api/portada", json!({})).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(!cuerpo.contains(PASSKEY), "{cuerpo}");
+    let d: DatosPortada = serde_json::from_str(&cuerpo).unwrap();
+    let f = d
+        .torrents
+        .iter()
+        .find(|t| t.hash == hash)
+        .expect("el torrent añadido en la portada");
+    assert_eq!(f.tracker, "127.0.0.1");
+    assert_eq!(f.normas, propias);
+    assert!(
+        eventos(&u)
+            .await
+            .contains(&(hash.clone(), Evento::Anadido, None)),
+        "{:?}",
+        eventos(&u).await
+    );
+
+    // La tarea horaria también: lo recuerda, y sin el passkey.
+    let inf = pasar(&u, ahora()).await;
+    assert!(inf.qbt_ok && inf.errores.is_empty(), "{inf:?}");
+    let pagina = u.pagina("/").await;
+    assert!(!pagina.contains(PASSKEY));
+    let reglas_pag = u.pagina("/reglas").await;
+    assert!(reglas_pag.contains("127.0.0.1"), "{reglas_pag}");
+    assert!(!reglas_pag.contains(PASSKEY));
+
+    qbt.borrar(std::slice::from_ref(&hash)).await;
 }

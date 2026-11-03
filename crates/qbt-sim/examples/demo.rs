@@ -23,7 +23,14 @@ fn torrent(
     ratio: f64,
 ) -> Value {
     let tamano = 4 * GB;
+    // Dos trackers de mentira (dominios de documentación), a medias.
+    let tracker = if u32::from(hash) % 2 == 0 {
+        "https://tracker.segundo.example/announce"
+    } else {
+        "https://tercero.example/announce"
+    };
     json!({
+        "tracker": tracker,
         "hash": hash.to_string().repeat(40), "name": nombre, "category": categoria,
         "state": estado, "downloaded": tamano * descargado_pct / 100, "total_size": tamano,
         "uploaded": (tamano as f64 * ratio) as i64, "seeding_time": dias * DIA,
@@ -40,6 +47,8 @@ async fn main() {
         ..Conf::default()
     })
     .await;
+    sim.control
+        .fijar_categorias(vec!["peliculas".into(), "series".into()]);
     sim.control.fijar_torrents(vec![
         torrent(
             '1',

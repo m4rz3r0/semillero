@@ -5,13 +5,18 @@
 //! torrent tiene que sembrarlo 7 días y el ratio tiene que llegar a 1.0 (o
 //! sembrarse 30 días). Las reglas de cada categoría ([`ReglasCategoria`])
 //! deciden qué se recoge de lo que ya cumple. Los presets ([`preset`]) las
-//! guardan juntas en un archivo que se puede compartir.
+//! guardan juntas en un archivo que se puede compartir. Cada tracker puede
+//! tener sus propias normas ([`trackers`]); las funciones `_con` reciben las
+//! de cada torrent.
 
 use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
 pub mod preset;
+pub mod trackers;
+
+pub use trackers::JuegoNormas;
 
 const DIA_S: i64 = 86_400;
 const HORA_S: i64 = 3600;
@@ -181,9 +186,18 @@ pub fn clasificar(t: &Torrent, n: &NormasTracker) -> Clasificacion {
 /// Torrents con los días de siembra y la ratio para parar que siguen
 /// activos: se paran, nunca se borran.
 pub fn a_pausar(torrents: &[Torrent], n: &NormasTracker) -> Vec<String> {
+    a_pausar_con(torrents, |_| n)
+}
+
+/// Como [`a_pausar`], con las normas de cada torrent.
+pub fn a_pausar_con<'n>(
+    torrents: &[Torrent],
+    normas: impl Fn(&Torrent) -> &'n NormasTracker,
+) -> Vec<String> {
     torrents
         .iter()
         .filter(|t| {
+            let n = normas(t);
             !PARADOS.contains(&t.estado_qbt.as_str())
                 && t.siembra_s >= n.siembra_s()
                 && t.ratio >= n.ratio_pausa
@@ -263,11 +277,26 @@ pub fn candidatos(
     exenciones: &HashSet<(String, TipoRegla)>,
     ahora: i64,
 ) -> Vec<Candidato> {
+    candidatos_con(torrents, |_| normas, reglas, discos, exenciones, ahora)
+}
+
+/// Como [`candidatos`], con las normas de cada torrent.
+pub fn candidatos_con<'n>(
+    torrents: &[Torrent],
+    normas: impl Fn(&Torrent) -> &'n NormasTracker,
+    reglas: &HashMap<String, ReglasCategoria>,
+    discos: &HashMap<String, Disco>,
+    exenciones: &HashSet<(String, TipoRegla)>,
+    ahora: i64,
+) -> Vec<Candidato> {
     let exento = |t: &Torrent, r: TipoRegla| exenciones.contains(&(t.hash.clone(), r));
     let mut elegidos: Vec<Candidato> = Vec::new();
     let mut por_disco: HashMap<&str, Vec<&Torrent>> = HashMap::new();
 
-    for t in torrents.iter().filter(|t| clasificar(t, normas).borrable) {
+    for t in torrents
+        .iter()
+        .filter(|t| clasificar(t, normas(t)).borrable)
+    {
         let Some(r) = reglas.get(&t.categoria) else {
             continue;
         };
@@ -362,6 +391,19 @@ pub fn avanzar(
     red_ok: bool,
     normas: &NormasTracker,
 ) -> Paso {
+    avanzar_con(avisos, candidatos, ahora, caido_s, red_ok, |_| normas)
+}
+
+/// Como [`avanzar`], con las normas de cada torrent (por su hash): un aviso
+/// nuevo vence a las horas de aviso de las suyas.
+pub fn avanzar_con<'n>(
+    avisos: &[Aviso],
+    candidatos: &[Candidato],
+    ahora: i64,
+    caido_s: i64,
+    red_ok: bool,
+    normas: impl Fn(&str) -> &'n NormasTracker,
+) -> Paso {
     let mut paso = Paso::default();
     for a in avisos {
         let mut a = a.clone();
@@ -382,7 +424,7 @@ pub fn avanzar(
                 hash: c.hash.clone(),
                 regla: c.regla,
                 creado_en: ahora,
-                vence_en: ahora + normas.aviso_s(),
+                vence_en: ahora + normas(&c.hash).aviso_s(),
             };
             paso.nuevos.push(a.clone());
             paso.vigentes.push(a);

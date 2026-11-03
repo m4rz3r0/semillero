@@ -4,6 +4,7 @@
 //! Los datos llegan ya en palabras (ver [`crate::api`]); aquí no aparece
 //! ningún nombre de la API de qBittorrent.
 
+pub mod anadir;
 pub mod formato;
 pub mod historial;
 pub mod login;
@@ -19,8 +20,8 @@ use leptos::prelude::*;
 use leptos_router::components::A;
 
 use crate::api::{
-    ERROR_REAUTH, aplicar_preset, cambiar_modo, eliminar_preset, guardar_normas, guardar_reglas,
-    quitar,
+    ERROR_REAUTH, aplicar_preset, cambiar_modo, eliminar_preset, guardar_normas,
+    guardar_normas_tracker, guardar_reglas, quitar, quitar_normas_tracker,
 };
 use crate::auth::{ERROR_SESION, Logout};
 
@@ -67,9 +68,15 @@ pub enum Delicada {
     EliminarPreset {
         id: i64,
     },
-    /// Con el borrado real activo; el diálogo pide la contraseña.
+    /// Con el borrado real activo; el diálogo pide la contraseña. Sin
+    /// `tracker`, las de por defecto.
     GuardarNormas {
         normas: NormasTracker,
+        tracker: Option<String>,
+    },
+    /// Con el borrado real activo; el diálogo pide la contraseña.
+    QuitarNormasTracker {
+        tracker: String,
     },
     /// Con el borrado real activo; el diálogo pide la contraseña.
     GuardarReglas {
@@ -84,7 +91,9 @@ impl Delicada {
     fn pide_clave_al_abrir(&self) -> bool {
         matches!(
             self,
-            Delicada::GuardarNormas { .. } | Delicada::GuardarReglas { .. }
+            Delicada::GuardarNormas { .. }
+                | Delicada::GuardarReglas { .. }
+                | Delicada::QuitarNormasTracker { .. }
         )
     }
 }
@@ -215,6 +224,7 @@ pub fn Cabecera(
                 <A href="/" exact=true>
                     "Jardín"
                 </A>
+                <A href="/anadir">"Añadir"</A>
                 <A href="/reglas">"Reglas"</A>
                 <A href="/historial">"Historial"</A>
             </nav>
@@ -398,7 +408,17 @@ fn Confirmacion() -> impl IntoView {
                 Delicada::BorradoReal => cambiar_modo(true, clave).await,
                 Delicada::AplicarPreset { id } => aplicar_preset(id, clave).await,
                 Delicada::EliminarPreset { id } => eliminar_preset(id).await,
-                Delicada::GuardarNormas { normas } => guardar_normas(normas, clave).await,
+                Delicada::GuardarNormas {
+                    normas,
+                    tracker: None,
+                } => guardar_normas(normas, clave).await,
+                Delicada::GuardarNormas {
+                    normas,
+                    tracker: Some(h),
+                } => guardar_normas_tracker(h, normas, clave).await,
+                Delicada::QuitarNormasTracker { tracker } => {
+                    quitar_normas_tracker(tracker, clave).await
+                }
                 Delicada::GuardarReglas { categoria, reglas } => {
                     guardar_reglas(categoria, reglas, clave).await
                 }

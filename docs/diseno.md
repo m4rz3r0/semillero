@@ -55,6 +55,33 @@ son los de un tracker privado habitual:
 - **Cumplido**: con los días de siembra y (ratio ≥ mínima o plazo máximo cumplido).
 - `total_size ≤ 0` con `downloaded > 0` nunca es Libre; después se clasifica como cualquier otro.
 
+### Normas por tracker
+
+Las de la tabla `normas` son las **de por defecto**. Cada tracker puede tener
+las suyas en la tabla `normas_tracker` (migración 0005), por host, con las
+mismas columnas y los mismos `CHECK`. Las normas de un torrent son las del host
+configurado más concreto que sea el de su anuncio o un dominio padre (separado
+por un punto: `ejemplo.example` vale para `tracker.ejemplo.example`, no para
+`malejemplo.example`; una IP, solo para ella misma); si no encaja ninguno, las de
+por defecto. Una base de datos de la 0.5 no tiene ninguna fila en
+`normas_tracker` y todo sigue igual.
+
+- El host sale del campo `tracker` de `torrents/info` (el tracker que funciona
+  ahora): sin esquema, usuario, puerto ni ruta, en minúsculas. El anuncio
+  entero lleva el passkey: se lee directamente como host y no se guarda, ni se
+  apunta en el registro, ni llega a la página.
+- La tabla `trackers_vistos` recuerda el último host de cada torrent. Si
+  qBittorrent da el campo vacío (el tracker no contesta), el torrent sigue con
+  las normas de ese host. Los torrents que llevan 7 días sin aparecer se
+  olvidan, como sus muestras de subida.
+- La pausa, la clasificación, los avisos (y sus horas), el borrado a mano y los
+  textos del historial usan las normas de cada torrent.
+- En la página de reglas salen los trackers de los torrents (con cuántos tiene
+  cada uno) y los que tienen normas propias. «Usar normas propias» abre los
+  mismos campos que las de por defecto, con las mismas comprobaciones y la
+  misma contraseña con el borrado real; quitar la marca borra su fila y vuelve
+  a las de por defecto. Como mucho 32 trackers con normas propias.
+
 Pausa automática con los días de siembra y la ratio para parar: nunca borra.
 Los rangos se comprueban al recibirlos y otra vez en la base de datos (al
 guardar y con `CHECK` en la tabla). La migración que crea la tabla la llena
@@ -97,15 +124,17 @@ web y está guardado en SQLite.
 
 ### Presets
 
-Un preset guarda juntas las normas del tracker y las reglas de las tres
-categorías, con un nombre y una descripción. En la página de reglas, sección
+Un preset guarda juntas las normas del tracker (las de por defecto y las de
+cada tracker) y las reglas de las tres categorías, con un nombre y una
+descripción. En la página de reglas, sección
 «Presets»:
 
 - **Guardar como preset**: la configuración de ahora, con nombre y descripción.
 - **Subir preset**: un archivo `.toml` de otra persona; se añade a la lista, sin aplicarlo.
-- En cada uno: **Aplicar** (con confirmación: sus normas y reglas sustituyen a
-  las de ahora; las categorías que no trae quedan apagadas; se apunta en el
-  historial), **Descargar** (el archivo, para compartirlo), **Cambiar**
+- En cada uno: **Aplicar** (con confirmación: sus normas, las de sus trackers
+  y sus reglas sustituyen a las de ahora; las categorías que no trae quedan
+  apagadas y los trackers que no trae, con las normas por defecto; el diálogo
+  dice cuántas normas por tracker quita y pone; se apunta en el historial), **Descargar** (el archivo, para compartirlo), **Cambiar**
   (nombre, descripción y, si se marca, poner en él la configuración de ahora)
   y **Eliminar** (con confirmación).
 - Hay uno incluido, «Por defecto»: normas por defecto y ninguna regla. Se
@@ -134,11 +163,37 @@ siembra_dias = 30
 disco_libre_pct = 10.0
 ```
 
+Con normas propias para algún tracker, el archivo es del **formato 2**: el
+mismo, con `formato = 2` y una sección por tracker, por su host, con las mismas
+claves que `[normas]`:
+
+```toml
+formato = 2
+# … nombre, descripción, [normas] y categorías como arriba …
+
+[trackers."ejemplo.example"]
+umbral_pct = 10.0
+siembra_dias = 14
+ratio_min = 1.0
+plazo_largo_dias = 60
+ratio_pausa = 3.0
+aviso_horas = 48
+```
+
+- semillero 0.6 lee los formatos 1 y 2. Uno del formato 1 (de la 0.3 a la
+  0.5) se lee con sus normas como las de por defecto y sin normas por tracker.
+- Un preset sin normas por tracker se escribe siempre en el formato 1, para que
+  una 0.5 lo pueda importar; uno con ellas, en el 2, que una 0.5 rechaza («solo
+  entiende el formato 1»).
+- Se rechazan también: secciones `[trackers]` en un formato 1 (dice que hace
+  falta el 2 y semillero 0.6), un formato 2 sin trackers, un host que no lo es
+  (con `https://`, puerto o ruta), un tracker repetido y más de 32.
+
 - Las categorías son `peliculas`, `series` y `sin_categoria`; las reglas son
   `ratio`, `siembra_dias`, `inactividad_dias` y `disco_libre_pct`, con los
   rangos de las tarjetas. Una regla que no está, está apagada.
 - Se rechaza entero, sin guardar nada y con una frase que dice qué falla: un
-  `formato` que no sea 1, cualquier clave de más o de menos, un tipo o un valor
+  `formato` que no sea 1 ni 2, cualquier clave de más o de menos, un tipo o un valor
   fuera de rango, un nombre vacío o de más de 60 caracteres, una descripción de
   más de 300, más de 16 categorías, una categoría que semillero no tiene, un
   nombre ya usado o un archivo de más de 64 KiB (se mira antes de leerlo, en el
@@ -156,7 +211,7 @@ disco_libre_pct = 10.0
 - **Franja de estado:** VPN, puerto abierto y disco libre por dataset. Solo destaca lo que falla.
 - **Pantalla principal:**
   - grupos Obligados, En espera, Cumplidos y Libres;
-  - cada torrent muestra nombre, barra de ratio, tiempo sembrado y qué le falta;
+  - cada torrent muestra nombre, barra de ratio, tiempo sembrado y qué le falta (según las normas de su tracker), y en su ficha el host del tracker;
   - acciones sencillas: pausar o reanudar; «Quitar» y «Borrar con ficheros» solo en Cumplidos y Libres, con confirmación.
 - **A punto de borrarse:** lista con cuenta atrás, regla causante y «No borrar».
 - **Reglas:** el interruptor global «Solo aviso / Borrado real», las normas del tracker, las tarjetas por categoría y los presets.
@@ -206,7 +261,7 @@ fijada en `rust-toolchain.toml`):
   el login, como 5.2) y para la demo (`cargo run -p qbt-sim --example demo`).
 - `crates/semillero`:
   - SSR con hidratación;
-  - SQLite (sqlx) para sesiones, normas del tracker, reglas, presets, avisos, exenciones, historial y muestras de subida;
+  - SQLite (sqlx) para sesiones, normas del tracker (las de por defecto y las de cada tracker), reglas, presets, avisos, exenciones, historial, muestras de subida y el último tracker de cada torrent;
   - tarea horaria;
   - lectura del fichero de estado de la VPN y del puerto (`SEMILLERO_ESTADO`), si lo hay;
   - `semillero configurar`: pregunta direcciones y claves, las comprueba y escribe el fichero `VARIABLE=valor` y los secretos aparte (0600).

@@ -1,5 +1,6 @@
-//! Reglas de recogida: «Solo aviso / Borrado real», las normas del tracker,
-//! un apartado por categoría (con su tiesto) con sus cuatro reglas
+//! Reglas de recogida: «Solo aviso / Borrado real», las normas del tracker
+//! (las de por defecto y las propias de cada tracker que se ve en los
+//! torrents), un apartado por categoría (con su tiesto) con sus cuatro reglas
 //! (interruptor y valor), los presets y los «No recoger» vigentes.
 
 use leptos::prelude::*;
@@ -11,9 +12,10 @@ use super::formato::decimal;
 use super::maceta::{Tiesto, TiestoVacio};
 use super::{Acciones, Delicada, Marco, Peticion, Recarga, pedir_confirmacion, texto_error};
 use crate::api::{
-    DatosReglas, FichaExencion, FichaPreset, RUTA_DESCARGA, TarjetaReglas, cambiar_modo,
-    cambiar_preset, guardar_normas, guardar_preset, guardar_reglas, nombre_categoria, nombre_regla,
-    pagina_reglas, quitar_exencion, subir_preset,
+    DatosReglas, FichaExencion, FichaPreset, FichaTracker, RUTA_DESCARGA, TarjetaReglas,
+    cambiar_modo, cambiar_preset, guardar_normas, guardar_normas_tracker, guardar_preset,
+    guardar_reglas, nombre_categoria, nombre_regla, pagina_reglas, quitar_exencion,
+    quitar_normas_tracker, subir_preset,
 };
 
 /// Texto del diálogo al guardar normas o reglas con el borrado real activo.
@@ -57,6 +59,27 @@ fn Contenido(p: DatosReglas, estado_presets: RwSignal<Option<(bool, String)>>) -
         .into_iter()
         .map(|t| view! { <Tarjeta t /> })
         .collect_view();
+    // Las normas que usa ahora cada tracker sin las suyas (las de su padre o
+    // las de por defecto): con ellas empieza el formulario al marcarlo.
+    let propias: Vec<(String, NormasTracker)> = p
+        .trackers
+        .iter()
+        .filter_map(|t| t.propias.map(|n| (t.host.clone(), n)))
+        .collect();
+    let con_propias = propias.len();
+    let defecto = p.normas;
+    let trackers = p
+        .trackers
+        .into_iter()
+        .map(|f| {
+            let usadas = f
+                .usa
+                .as_ref()
+                .and_then(|h| propias.iter().find(|(p, _)| p == h))
+                .map_or(defecto, |(_, n)| *n);
+            view! { <UnTracker f usadas /> }
+        })
+        .collect_view();
     view! {
         <Modo real=p.modo_real />
         <p class="explica">
@@ -69,7 +92,19 @@ fn Contenido(p: DatosReglas, estado_presets: RwSignal<Option<(bool, String)>>) -
             <Normas n=p.normas />
             {tarjetas}
         </div>
-        <Presets lista=p.presets estado=estado_presets />
+        <section class="seccion exenciones-nota" aria-labelledby="titulo-trackers">
+            <h2 id="titulo-trackers">"Normas por tracker"</h2>
+            <p class="explica">
+                "Cada torrent sigue las normas de su tracker. Los que no tienen normas propias usan las de arriba (o las de su dominio, si las tiene: ejemplo.example vale para tracker.ejemplo.example)."
+            </p>
+            {if trackers.is_empty() {
+                view! { <p class="vacio">"Aún no se ve ningún tracker en los torrents."</p> }
+                    .into_any()
+            } else {
+                view! { <div class="categorias">{trackers}</div> }.into_any()
+            }}
+        </section>
+        <Presets lista=p.presets estado=estado_presets con_propias />
         <Exenciones lista=p.exenciones />
     }
 }
@@ -190,7 +225,7 @@ fn entero(s: &str) -> Option<u32> {
 /// Una cifra de las normas: frase, valor y unidad.
 #[component]
 fn Cifra(
-    id: &'static str,
+    id: String,
     valor: RwSignal<String>,
     antes: &'static str,
     despues: &'static str,
@@ -198,7 +233,7 @@ fn Cifra(
 ) -> impl IntoView {
     view! {
         <div class="regla-valor norma">
-            <label for=id>{antes}</label>
+            <label for=id.clone()>{antes}</label>
             <input
                 id=id
                 type="number"
@@ -215,9 +250,129 @@ fn Cifra(
 }
 
 /// Las normas del tracker: cuándo un torrent obliga a sembrar y cuánto. Lo
-/// que no las cumple no se recoge nunca, ni a mano ni con las reglas.
+/// que no las cumple no se recoge nunca, ni a mano ni con las reglas. Estas
+/// son las de por defecto.
 #[component]
 fn Normas(n: NormasTracker) -> impl IntoView {
+    view! {
+        <section class="categoria tablilla normas" aria-labelledby="normas-titulo">
+            <h2 id="normas-titulo">
+                <span>"Normas del tracker"</span>
+            </h2>
+            <p class="nota">
+                "Lo que pide tu tracker para no dejar de sembrar antes de tiempo. Mientras un torrent no las cumple, no se recoge: ni a mano ni con las reglas."
+            </p>
+            <FormNormas n tracker=None />
+        </section>
+    }
+}
+
+/// Un trozo de `id` para el host de un tracker: letras, cifras y guiones.
+fn id_de_host(host: &str) -> String {
+    host.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
+}
+
+/// Un tracker: cuántos torrents tiene y, con «Usar normas propias», sus
+/// normas (el mismo formulario que las de por defecto). Al quitar la marca
+/// vuelve a usar las de por defecto (o las de su dominio).
+#[component]
+fn UnTracker(f: FichaTracker, usadas: NormasTracker) -> impl IntoView {
+    let recarga = expect_context::<Recarga>().0;
+    let host = f.host.clone();
+    let base = format!("tracker-{}", id_de_host(&host));
+    let marcada = RwSignal::new(f.propias.is_some());
+    let tenia = f.propias.is_some();
+    let estado = RwSignal::new(None::<(bool, String)>);
+    let quitar = Action::new(move |h: &String| {
+        let h = h.clone();
+        async move { (h.clone(), quitar_normas_tracker(h, None).await) }
+    });
+    let titulo = format!("¿Quitar las normas propias de {host}?");
+    Effect::new(move |_| match quitar.value().get() {
+        Some((_, Ok(()))) => recarga.update(|v| *v += 1),
+        Some((tracker, Err(ServerFnError::ServerError(m)))) if m == ERROR_REAUTH => {
+            marcada.set(true);
+            pedir_confirmacion(Peticion {
+                titulo: titulo.clone(),
+                texto: CON_BORRADO_REAL.into(),
+                boton: "Quitar",
+                que: Delicada::QuitarNormasTracker { tracker },
+            });
+        }
+        Some((_, Err(e))) => {
+            marcada.set(true);
+            estado.set(Some((false, texto_error(&e))));
+        }
+        None => {}
+    });
+    let h = host.clone();
+    Effect::new(move |antes: Option<bool>| {
+        let ahora = marcada.get();
+        if antes == Some(true) && !ahora && tenia {
+            estado.set(None);
+            quitar.dispatch(h.clone());
+        }
+        ahora
+    });
+    let cuantos = match f.torrents {
+        0 => "Ningún torrent ahora".to_owned(),
+        1 => "1 torrent".to_owned(),
+        n => format!("{n} torrents"),
+    };
+    let usa = match (&f.propias, &f.usa) {
+        (Some(_), _) => "usa sus normas propias.".to_owned(),
+        (None, Some(padre)) => format!("usa las normas de {padre}."),
+        (None, None) => "usa las normas por defecto.".to_owned(),
+    };
+    let n = f.propias.unwrap_or(usadas);
+    let (id_casilla, id_casilla2, id_titulo, id_h2) = (
+        format!("{base}-propias"),
+        format!("{base}-propias"),
+        format!("{base}-titulo"),
+        format!("{base}-titulo"),
+    );
+    let tracker = host.clone();
+    view! {
+        <section class="categoria tablilla normas" aria-labelledby=id_titulo>
+            <h2 id=id_h2>
+                <span>{host.clone()}</span>
+            </h2>
+            <p class="nota">{format!("{cuantos}; {usa}")}</p>
+            <div class="regla">
+                <input
+                    id=id_casilla
+                    type="checkbox"
+                    role="switch"
+                    class="interruptor"
+                    bind:checked=marcada
+                />
+                <label for=id_casilla2 class="regla-nombre">
+                    "Usar normas propias"
+                </label>
+            </div>
+            <p
+                class=move || match estado.get() {
+                    Some((false, _)) => "estado-guardar error",
+                    _ => "estado-guardar",
+                }
+                role="status"
+            >
+                {move || estado.get().map(|(_, m)| m)}
+            </p>
+            <Show when=move || marcada.get()>
+                <FormNormas n tracker=Some(tracker.clone()) />
+            </Show>
+        </section>
+    }
+}
+
+/// Los campos de unas normas y «Guardar»: las de por defecto (`tracker`
+/// vacío) o las propias de un tracker.
+#[component]
+fn FormNormas(n: NormasTracker, tracker: Option<String>) -> impl IntoView {
+    let recarga = expect_context::<Recarga>().0;
     let umbral = RwSignal::new(cifra_campo(n.umbral_pct));
     let siembra = RwSignal::new(n.siembra_dias.to_string());
     let ratio_min = RwSignal::new(cifra_campo(n.ratio_min));
@@ -226,22 +381,46 @@ fn Normas(n: NormasTracker) -> impl IntoView {
     let aviso = RwSignal::new(n.aviso_horas.to_string());
     let estado = RwSignal::new(None::<(bool, String)>);
 
+    let base = match &tracker {
+        None => "normas".to_owned(),
+        Some(h) => format!("normas-{}", id_de_host(h)),
+    };
+    let id = |campo: &str| format!("{base}-{campo}");
+    let titulo = match &tracker {
+        None => "¿Guardar las normas del tracker?".to_owned(),
+        Some(h) => format!("¿Guardar las normas de {h}?"),
+    };
+    let t = tracker.clone();
     let guardar = Action::new(move |n: &NormasTracker| {
-        let n = *n;
-        async move { (n, guardar_normas(n, None).await) }
+        let (n, t) = (*n, t.clone());
+        async move {
+            let r = match t.clone() {
+                None => guardar_normas(n, None).await,
+                Some(h) => guardar_normas_tracker(h, n, None).await,
+            };
+            (n, t, r)
+        }
     });
     Effect::new(move |_| match guardar.value().get() {
-        Some((_, Ok(()))) => estado.set(Some((true, "Guardado.".into()))),
+        Some((_, t, Ok(()))) => {
+            estado.set(Some((true, "Guardado.".into())));
+            // Las de un tracker: se recarga la página, como tras la
+            // contraseña, para que su tarjeta sepa que ya las tiene (y quitar
+            // la marca las borre) y el diálogo de aplicar un preset las cuente.
+            if t.is_some() {
+                recarga.update(|v| *v += 1);
+            }
+        }
         // Con el borrado real hace falta la contraseña: la pide el diálogo.
-        Some((normas, Err(ServerFnError::ServerError(m)))) if m == ERROR_REAUTH => {
+        Some((normas, tracker, Err(ServerFnError::ServerError(m)))) if m == ERROR_REAUTH => {
             pedir_confirmacion(Peticion {
-                titulo: "¿Guardar las normas del tracker?".into(),
+                titulo: titulo.clone(),
                 texto: CON_BORRADO_REAL.into(),
                 boton: "Guardar",
-                que: Delicada::GuardarNormas { normas },
+                que: Delicada::GuardarNormas { normas, tracker },
             });
         }
-        Some((_, Err(e))) => estado.set(Some((false, texto_error(&e)))),
+        Some((_, _, Err(e))) => estado.set(Some((false, texto_error(&e)))),
         None => {}
     });
 
@@ -272,51 +451,44 @@ fn Normas(n: NormasTracker) -> impl IntoView {
     };
 
     view! {
-        <section class="categoria tablilla normas" aria-labelledby="normas-titulo">
-            <h2 id="normas-titulo">
-                <span>"Normas del tracker"</span>
-            </h2>
-            <p class="nota">
-                "Lo que pide tu tracker para no dejar de sembrar antes de tiempo. Mientras un torrent no las cumple, no se recoge: ni a mano ni con las reglas."
-            </p>
-            <form on:submit=enviar>
+        <form on:submit=enviar>
                 <Cifra
-                    id="normas-umbral"
+                    id=id("umbral")
                     valor=umbral
                     antes="Obliga a sembrar desde el"
                     despues="% descargado"
                     paso="1"
                 />
                 <Cifra
-                    id="normas-siembra"
+                    id=id("siembra")
                     valor=siembra
                     antes="Sembrar al menos"
                     despues="días"
                     paso="1"
                 />
                 <Cifra
-                    id="normas-ratio"
+                    id=id("ratio")
                     valor=ratio_min
                     antes="Después, listo con ratio"
                     despues=""
                     paso="0.1"
                 />
                 <Cifra
-                    id="normas-plazo"
+                    id=id("plazo")
                     valor=plazo
                     antes="o a los"
                     despues="días sembrando"
                     paso="1"
                 />
                 <Cifra
-                    id="normas-pausa"
+                    id=id("pausa")
                     valor=ratio_pausa
                     antes="Parar solo al llegar a ratio"
                     despues=""
                     paso="0.1"
                 />
                 <Cifra
-                    id="normas-aviso"
+                    id=id("aviso")
                     valor=aviso
                     antes="Avisar"
                     despues="horas antes de recoger"
@@ -340,8 +512,7 @@ fn Normas(n: NormasTracker) -> impl IntoView {
                         "Guardar"
                     </button>
                 </div>
-            </form>
-        </section>
+        </form>
     }
 }
 
@@ -521,7 +692,12 @@ enum Abierto {
 /// Los presets: guardar la configuración de ahora, subir un archivo y, en
 /// cada uno, aplicar, descargar, cambiar y eliminar.
 #[component]
-fn Presets(lista: Vec<FichaPreset>, estado: RwSignal<Option<(bool, String)>>) -> impl IntoView {
+fn Presets(
+    lista: Vec<FichaPreset>,
+    estado: RwSignal<Option<(bool, String)>>,
+    /// Trackers con normas propias ahora.
+    con_propias: usize,
+) -> impl IntoView {
     let recarga = expect_context::<Recarga>().0;
     let abierto = RwSignal::new(None::<Abierto>);
     let archivo = NodeRef::<leptos::html::Input>::new();
@@ -574,13 +750,13 @@ fn Presets(lista: Vec<FichaPreset>, estado: RwSignal<Option<(bool, String)>>) ->
 
     let filas = lista
         .into_iter()
-        .map(|p| view! { <UnPreset p abierto estado /> })
+        .map(|p| view! { <UnPreset p abierto estado con_propias /> })
         .collect_view();
     view! {
         <section class="seccion exenciones-nota presets" aria-labelledby="titulo-presets">
             <h2 id="titulo-presets">"Presets"</h2>
             <p class="explica">
-                "Un preset guarda las normas del tracker y las reglas de las tres categorías. «Aplicar» cambia todo de una vez; «Descargar» da un archivo .toml para compartirlo, y «Subir preset» lo añade a la lista (64 KiB como mucho)."
+                "Un preset guarda las normas del tracker (también las de cada tracker) y las reglas de las tres categorías. «Aplicar» cambia todo de una vez; «Descargar» da un archivo .toml para compartirlo, y «Subir preset» lo añade a la lista (64 KiB como mucho)."
             </p>
             <div class="preset-botones">
                 <button
@@ -635,14 +811,16 @@ fn UnPreset(
     p: FichaPreset,
     abierto: RwSignal<Option<Abierto>>,
     estado: RwSignal<Option<(bool, String)>>,
+    con_propias: usize,
 ) -> impl IntoView {
     let id = p.id;
     let nombre = p.nombre.clone();
+    let texto_aplicar = texto_aplicar(con_propias, p.trackers);
     let aplicar = move |_| {
         estado.set(None);
         pedir_confirmacion(Peticion {
             titulo: format!("¿Aplicar «{nombre}»?"),
-            texto: "Sus normas del tracker y sus reglas sustituyen a las de ahora; las categorías que no traiga quedan con todas las reglas apagadas. Si quieres conservar lo de ahora, guárdalo antes como preset.".into(),
+            texto: texto_aplicar.clone(),
             boton: "Aplicar",
             que: Delicada::AplicarPreset { id },
         });
@@ -703,6 +881,34 @@ fn UnPreset(
             </Show>
         </li>
     }
+}
+
+/// Lo que dice el diálogo al aplicar un preset con `trae` trackers con
+/// normas propias cuando ahora hay `hay`.
+fn texto_aplicar(hay: usize, trae: usize) -> String {
+    let mut t = "Sus normas del tracker y sus reglas sustituyen a las de ahora; las categorías que no traiga quedan con todas las reglas apagadas.".to_owned();
+    if hay > 0 || trae > 0 {
+        let trackers = |n: usize| match n {
+            1 => "1 tracker".to_owned(),
+            n => format!("{n} trackers"),
+        };
+        let quita = (hay > 0).then(|| format!("quita las normas propias de {}", trackers(hay)));
+        let pone = (trae > 0).then(|| format!("pone las de {}", trackers(trae)));
+        let frase = match (quita, pone) {
+            (Some(q), Some(p)) => format!("{q} y {p}"),
+            (Some(q), None) => q,
+            (None, Some(p)) => p,
+            (None, None) => unreachable!(),
+        };
+        let mut c = frase.chars();
+        let frase: String = c
+            .next()
+            .map(|p| p.to_uppercase().chain(c).collect())
+            .unwrap_or_default();
+        t.push_str(&format!(" {frase}."));
+    }
+    t.push_str(" Si quieres conservar lo de ahora, guárdalo antes como preset.");
+    t
 }
 
 /// Nombre y descripción de un preset: nuevo (`id` vacío, con la

@@ -42,13 +42,28 @@ Las capturas son del modo de prueba, con el qBittorrent simulado (ver
 - **Normas del tracker configurables**: descarga mínima para que cuente,
   días de siembra, ratio mínima, plazo máximo, ratio para pararlo y horas de
   aviso. Los valores de partida son los de un tracker privado habitual.
+- **Normas por tracker**: si usas más de un tracker, cada uno puede tener
+  las suyas. semillero mira el host del anuncio de cada torrent (nunca
+  guarda ni enseña el anuncio entero, que lleva tu passkey); un tracker sin
+  normas propias usa las de por defecto, y si el tracker se cae, el torrent
+  sigue con las del último que se le vio.
 - **Reglas de borrado por categoría**: ratio, tiempo sembrando, inactividad
   y espacio libre en disco. Solo afectan a torrents que ya cumplieron o que
   no cuentan.
 - **Siempre avisa antes**: cada borrado automático sale primero en «A punto
   de borrarse», con cuenta atrás y un botón para impedirlo.
 - **Presets que se comparten**: guarda tus normas y reglas en un archivo,
-  descárgalo, súbelo en otro semillero y aplícalo.
+  descárgalo, súbelo en otro semillero y aplícalo. Los presets de antes
+  siguen valiendo; uno con normas por tracker usa el formato 2, que solo
+  entiende semillero 0.6 o posterior (sin ellas se sigue guardando en el
+  formato 1).
+- **Añadir torrents sin la web de qBittorrent**: en «Añadir», sube archivos
+  `.torrent` o pega enlaces magnet (uno por línea) y elige una de las
+  categorías de qBittorrent. Como mucho 10 archivos de 4 MiB y 50 enlaces
+  de una vez. No acepta direcciones web (`http://` o `https://`): qBittorrent
+  las descargaría desde dentro de tu red. Si alguno no vale, no se añade
+  ninguno, y el error dice qué línea o qué archivo falla sin repetir el
+  enlace (puede llevar tu clave del tracker).
 - **Borrado real con contraseña**: al estrenarlo solo avisa. Para que borre
   de verdad, lo activas tú y te pide la contraseña.
 - **Jellyfin, si quieres**: tras borrar, le pide a la mediateca que lo
@@ -177,6 +192,8 @@ fallos=<renovaciones seguidas del puerto que han fallado>
 - Freno de intentos por dirección del cliente, no por usuario.
 - Pide otra vez la contraseña para borrar de verdad y, con el borrado real
   activo, para cambiar normas, reglas o preset.
+- Solo quien ha entrado puede añadir torrents, y nunca desde una dirección
+  web: solo archivos `.torrent` y enlaces magnet comprobados.
 - Al público no le dice la versión.
 
 Para entrar desde otro equipo, ponlo detrás de un proxy inverso con HTTPS:

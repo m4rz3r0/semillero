@@ -5,6 +5,7 @@
 mod comun;
 
 mod acceso;
+mod anadir;
 mod argumentos;
 mod config;
 mod configurar;
@@ -23,3 +24,4 @@ mod sondas_t5;
 mod sondas_t5v;
 mod sondas_tarea;
 mod tarea;
+mod trackers;

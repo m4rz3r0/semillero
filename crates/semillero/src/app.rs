@@ -6,6 +6,7 @@ use leptos_meta::{HashedStylesheet, MetaTags, Title, provide_meta_context};
 use leptos_router::components::{Route, Router, Routes};
 use leptos_router::{SsrMode, StaticSegment};
 
+use crate::ui::anadir::PaginaAnadir;
 use crate::ui::historial::PaginaHistorial;
 use crate::ui::login::PaginaLogin;
 use crate::ui::portada::PaginaPortada;
@@ -109,6 +110,7 @@ pub fn App() -> impl IntoView {
             <Routes fallback=NoEncontrada>
                 <Route path=StaticSegment("login") view=PaginaLogin />
                 <Route path=StaticSegment("") view=PaginaPortada ssr=SsrMode::Async />
+                <Route path=StaticSegment("anadir") view=PaginaAnadir ssr=SsrMode::Async />
                 <Route path=StaticSegment("reglas") view=PaginaReglas ssr=SsrMode::Async />
                 <Route
                     path=StaticSegment("historial")
