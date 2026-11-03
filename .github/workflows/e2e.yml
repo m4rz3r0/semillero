@@ -62,7 +62,7 @@ jobs:
             -- --nocapture 2>&1 | tee "$RUNNER_TEMP/salida"
           # Que no se haya saltado ninguna: sin las variables pasarían igual.
           if grep -q saltada "$RUNNER_TEMP/salida"; then exit 1; fi
-          grep -q 'test result: ok\. 2 passed' "$RUNNER_TEMP/salida"
+          grep -q 'test result: ok\. 3 passed' "$RUNNER_TEMP/salida"
       - name: Registro de qBittorrent y parar
         if: always()
         run: sh tools/e2e/qbittorrent.sh parar
