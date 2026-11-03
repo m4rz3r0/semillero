@@ -121,6 +121,11 @@ The install guides are in Spanish. Their commands work as they are.
 
 Replace `X.Y.Z` with the version.
 
+To upgrade, replace the program with the new version's and restart: the
+database migrates by itself. On every change the CI tests that every
+published release since 0.3.0 upgrades to the new one with no manual steps
+and keeps all its data (`.github/workflows/actualizacion.yml`).
+
 ### qBittorrent versions that pass
 
 CI tests every change end to end against a real qBittorrent (the official
@@ -177,6 +182,12 @@ wins over the one in the file.
 `<port>` is the port of `SEMILLERO_LISTEN`. The qBittorrent password and the
 Jellyfin key live in one file each, readable only by their owner (`chmod
 600`), not in a variable, because variables show up in the process list.
+
+These variables and the format of the file `semillero configurar` writes
+are a contract until 2.0: none is removed or changed. If one is renamed,
+the old name keeps working for at least one version, with a warning in the
+log naming the new one; if both are set, the new one wins and the warning
+says the old one is ignored.
 
 The `SEMILLERO_ESTADO` file is written by the program that keeps the VPN up
 and opens the port, at least every 45 seconds, with these lines:

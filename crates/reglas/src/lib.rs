@@ -333,12 +333,12 @@ pub fn candidatos_con<'n>(
             continue;
         };
         let objetivo = (pct / 100.0 * d.total as f64).ceil() as i64;
-        let mut libre = d.libre
-            + torrents
-                .iter()
-                .filter(|t| t.categoria == cat && elegidos.iter().any(|c| c.hash == t.hash))
-                .map(|t| t.tamano.max(0))
-                .sum::<i64>();
+        // Sumas saturadas: con tamaños absurdos no se desborda (en debug
+        // sería un pánico y en release daría la vuelta).
+        let mut libre = torrents
+            .iter()
+            .filter(|t| t.categoria == cat && elegidos.iter().any(|c| c.hash == t.hash))
+            .fold(d.libre, |s, t| s.saturating_add(t.tamano.max(0)));
         lista.sort_by(|a, b| {
             a.anadido_en
                 .cmp(&b.anadido_en)
@@ -348,7 +348,7 @@ pub fn candidatos_con<'n>(
             if libre >= objetivo {
                 break;
             }
-            libre += t.tamano.max(0);
+            libre = libre.saturating_add(t.tamano.max(0));
             elegidos.push(Candidato {
                 hash: t.hash.clone(),
                 regla: TipoRegla::Disco,

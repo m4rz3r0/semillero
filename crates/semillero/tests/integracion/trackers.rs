@@ -565,19 +565,7 @@ ratio = 3.0
 /// Una base de datos como la deja la 0.5: migraciones 0001 a 0004, con
 /// normas cambiadas, reglas, un aviso y un preset guardado.
 async fn base_de_la_0_5(ruta: &Path) {
-    let opciones = sqlx::sqlite::SqliteConnectOptions::new()
-        .filename(ruta)
-        .create_if_missing(true);
-    let pool = sqlx::SqlitePool::connect_with(opciones).await.unwrap();
-    let mut m = sqlx::migrate!("./migrations");
-    m.migrations = m
-        .migrations
-        .iter()
-        .filter(|x| x.version <= 4)
-        .cloned()
-        .collect::<Vec<_>>()
-        .into();
-    m.run(&pool).await.unwrap();
+    let pool = comun::base_hasta_migracion(ruta, 4).await;
     sqlx::query(
         "UPDATE normas SET umbral_pct = 5, siembra_dias = 2, ratio_min = 0.8,
            plazo_largo_dias = 9, ratio_pausa = 1.5, aviso_horas = 12 WHERE id = 1",

@@ -48,7 +48,7 @@ OBJ=x86_64-unknown-linux-gnu
 REPO=${GITHUB_REPOSITORY:-m4rz3r0/semillero}
 CLAVE_0_2=/usr/local/etc/semillero/jellyfin.clave
 # Tablas con datos de la prueba; las que no tenga la versión antigua se saltan.
-TABLAS="ajustes reglas avisos exenciones historial normas presets"
+TABLAS="ajustes reglas avisos exenciones historial normas presets normas_tracker trackers_vistos"
 # Dos torrents de mentira (el hash v1 de qBittorrent: 40 hexadecimales).
 HASH_A=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 HASH_B=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
@@ -327,6 +327,14 @@ ahora=$(date +%s)
 		VALUES ($ahora, '$HASH_A', 'Prueba del salto', 'Aviso', 'ratio', 'ratio 2,50 de 2,50');"
 	if hay_tabla normas; then
 		echo "UPDATE normas SET siembra_dias = 3, aviso_horas = 12 WHERE id = 1;"
+	fi
+	if hay_tabla normas_tracker; then
+		echo "INSERT INTO normas_tracker (host, umbral_pct, siembra_dias, ratio_min,
+			plazo_largo_dias, ratio_pausa, aviso_horas)
+			VALUES ('tracker.example', 20.0, 3, 0.5, 12, 4.0, 6);"
+	fi
+	if hay_tabla trackers_vistos; then
+		echo "INSERT INTO trackers_vistos (hash, host, visto) VALUES ('$HASH_A', 'tracker.example', $ahora);"
 	fi
 	if hay_tabla presets; then
 		echo "INSERT INTO presets (nombre, descripcion, archivo, cambiado) VALUES (

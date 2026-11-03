@@ -252,3 +252,23 @@ pub async fn token(p: &Prueba, cookie: &str) -> String {
     let fin = resto[c..].find('"').unwrap();
     resto[c..c + fin].to_owned()
 }
+
+/// Una base de datos en `ruta` con solo las migraciones hasta la `nivel`
+/// (incluida), como la deja una versión anterior; sin abrirla con
+/// [`semillero::db::abrir`], que aplicaría las demás.
+pub async fn base_hasta_migracion(ruta: &std::path::Path, nivel: i64) -> sqlx::SqlitePool {
+    let opciones = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(ruta)
+        .create_if_missing(true);
+    let pool = sqlx::SqlitePool::connect_with(opciones).await.unwrap();
+    let mut m = sqlx::migrate!("./migrations");
+    m.migrations = m
+        .migrations
+        .iter()
+        .filter(|x| x.version <= nivel)
+        .cloned()
+        .collect::<Vec<_>>()
+        .into();
+    m.run(&pool).await.unwrap();
+    pool
+}

@@ -59,8 +59,14 @@ async fn main() -> std::process::ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let leer = semillero::config::con_fichero(|k| std::env::var(k).ok(), fichero);
+    let (leer, avisos) = semillero::config::con_renombres(
+        semillero::config::con_fichero(|k| std::env::var(k).ok(), fichero),
+        semillero::config::RENOMBRADAS,
+    );
     iniciar_registro(leer("SEMILLERO_LOG"));
+    for aviso in &avisos {
+        tracing::warn!("{aviso}");
+    }
     let cfg = match Config::desde(&leer) {
         Ok(cfg) => cfg,
         Err(e) => {

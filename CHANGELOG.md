@@ -3,6 +3,33 @@
 Lo que cambia en cada versión publicada. Lo que viene después, en
 [ROADMAP.md](ROADMAP.md).
 
+## 0.7.0
+
+Al actualizar no hay que hacer nada: no hay migraciones nuevas, ni cambia el
+formato de los presets, ni ninguna variable de configuración. Esta versión
+comprueba con pruebas lo que la 1.0 va a prometer.
+
+- **Contrato de configuración.** Una prueba fija las variables
+  `SEMILLERO_*` y el fichero que escribe `semillero configurar`; no cambian
+  hasta la 2.0. Si alguna cambia de nombre, el nombre viejo sigue valiendo
+  con un aviso en el registro (y si están los dos, manda el nuevo). Hoy no
+  cambia ninguna.
+- **Actualización desde cada versión publicada.** La CI instala cada
+  versión publicada desde la 0.3.0 con su binario de verdad, le mete datos,
+  la cambia por la nueva y comprueba que arranca y conserva todas las
+  filas. Además, una prueba abre la base de datos que deja cada versión.
+- **Presets de cada versión.** El repositorio guarda un preset exportado por
+  cada versión publicada (de la 0.3.0 a la 0.6.0, con y sin normas por
+  tracker), y la nueva tiene que cargarlos todos con las mismas normas.
+- **Pruebas de propiedades** en el crate `reglas`: ningún torrent que no
+  haya cumplido sale nunca como «Listo para recoger», cada torrent se juzga
+  con las normas de su tracker y nada se recoge antes de sus horas de aviso.
+  - Encontraron un desbordamiento al sumar el espacio que libera una regla
+    de disco con tamaños de torrent imposibles (cerca de 8 EiB); ya no se
+    desborda.
+- La hoja de ruta reparte lo que falta para la 1.0 en la 0.7 (esta) y la
+  0.8 (seguridad y accesibilidad).
+
 ## 0.6.0
 
 Al actualizar no hay que hacer nada: la base de datos se migra sola al

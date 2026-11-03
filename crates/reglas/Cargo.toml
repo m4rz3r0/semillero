@@ -11,3 +11,7 @@ publish = false
 serde.workspace = true
 # Archivos de preset.
 toml.workspace = true
+
+[dev-dependencies]
+# Pruebas de propiedades; sin `fork` ni `timeout`, que no hacen falta.
+proptest = { version = "1.12", default-features = false, features = ["std"] }

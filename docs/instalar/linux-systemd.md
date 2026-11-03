@@ -115,7 +115,9 @@ install -m 0644 /opt/semillero/semillero.service /etc/systemd/system/semillero.s
 systemctl daemon-reload && systemctl restart semillero
 ```
 
-La base de datos se queda en `/var/lib/semillero`.
+La base de datos se queda en `/var/lib/semillero` y se migra sola al
+arrancar: la CI prueba que cualquier versión publicada desde la 0.3.0 se
+actualiza así, sin pasos a mano.
 
 ## Quitarlo
 

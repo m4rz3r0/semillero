@@ -45,6 +45,11 @@ Para verlo en el navegador sin qBittorrent, sigue
 ## Cada cambio, con su prueba
 
 - Una prueba que falla antes del cambio y pasa después.
+- Las reglas de `crates/reglas` tienen además pruebas de propiedades
+  (`crates/reglas/tests/propiedades.rs`, con `proptest`): torrents y normas
+  al azar en los que ninguno sale «Listo para recoger» sin haber cumplido,
+  cada uno se juzga con las normas de su tracker y nada se recoge antes de
+  sus horas de aviso. Si cambias las reglas, tienen que seguir pasando.
 - Si cambias una variable, una opción o un mensaje, cambia también la
   documentación (`README.md`, `README.en.md`, `docs/`).
 

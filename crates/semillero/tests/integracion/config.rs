@@ -376,3 +376,170 @@ mod fichero_env {
         assert!(e.contains("demasiado grande"), "{e}");
     }
 }
+
+// ---------------------------------------------------------------- contrato hasta la 2.0
+
+mod contrato {
+    use std::collections::BTreeSet;
+
+    use semillero::config::{Config, RENOMBRADAS, VARIABLES, con_renombres};
+
+    const AVISO: &str = "Las variables SEMILLERO_* son el contrato de configuración hasta la \
+        2.0: no se quitan ni cambian de nombre. Si una cambia de nombre, el nombre viejo va \
+        en config::RENOMBRADAS (sigue valiendo, con un aviso en el registro) durante al \
+        menos una versión";
+
+    /// La lista que no cambia hasta la 2.0.
+    const CONTRATO: [&str; 13] = [
+        "SEMILLERO_DB",
+        "SEMILLERO_ESTADO",
+        "SEMILLERO_JELLYFIN",
+        "SEMILLERO_JELLYFIN_CLAVE",
+        "SEMILLERO_LISTEN",
+        "SEMILLERO_LOG",
+        "SEMILLERO_LOGIN_DESDE",
+        "SEMILLERO_ORIGEN",
+        "SEMILLERO_PORT",
+        "SEMILLERO_PROXY",
+        "SEMILLERO_QBT",
+        "SEMILLERO_QBT_CLAVE",
+        "SEMILLERO_QBT_USUARIO",
+    ];
+
+    #[test]
+    fn las_variables_son_las_del_contrato() {
+        let hay: BTreeSet<&str> = VARIABLES.iter().copied().collect();
+        assert_eq!(hay.len(), VARIABLES.len(), "variable repetida en VARIABLES");
+        assert_eq!(hay, CONTRATO.into_iter().collect(), "{AVISO}");
+    }
+
+    #[test]
+    fn los_nombres_viejos_no_son_variables_y_los_nuevos_si() {
+        for (vieja, nueva) in RENOMBRADAS {
+            assert!(!VARIABLES.contains(vieja), "{vieja}: {AVISO}");
+            assert!(VARIABLES.contains(nueva), "{nueva}: {AVISO}");
+        }
+    }
+
+    /// El servidor no lee ninguna `SEMILLERO_*` que no esté en la lista, y
+    /// la lista no tiene ninguna que no lea (`SEMILLERO_LOG` la lee al
+    /// arrancar, antes de la configuración).
+    #[test]
+    fn la_configuracion_lee_justo_las_variables_de_la_lista() {
+        let pedidas = std::sync::Mutex::new(BTreeSet::new());
+        let valor = |k: &str| match k {
+            "SEMILLERO_PORT" => "8090",
+            "SEMILLERO_LISTEN" => "127.0.0.1",
+            "SEMILLERO_LOGIN_DESDE" | "SEMILLERO_PROXY" => "192.0.2.7",
+            "SEMILLERO_QBT" => "http://192.0.2.20:8080",
+            "SEMILLERO_JELLYFIN" => "http://192.0.2.30:8096",
+            _ => "/x/y",
+        };
+        Config::desde(|k| {
+            pedidas.lock().unwrap().insert(k.to_owned());
+            k.starts_with("SEMILLERO_").then(|| valor(k).to_owned())
+        })
+        .unwrap();
+        let pedidas: BTreeSet<String> = pedidas.into_inner().unwrap();
+        let esperadas: BTreeSet<String> = VARIABLES
+            .iter()
+            .filter(|k| **k != "SEMILLERO_LOG")
+            .map(|k| (*k).to_owned())
+            .collect();
+        assert_eq!(pedidas, esperadas, "{AVISO}");
+    }
+
+    /// Cada variable sale en la tabla de la configuración de los dos README.
+    #[test]
+    fn cada_variable_esta_documentada_en_los_readme() {
+        let raiz = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for (readme, contrato) in [
+            ("README.md", "contrato hasta la 2.0"),
+            ("README.en.md", "contract until 2.0"),
+        ] {
+            let texto = std::fs::read_to_string(raiz.join(readme)).unwrap();
+            for k in VARIABLES {
+                assert!(
+                    texto.lines().any(|l| l.starts_with(&format!("| `{k}` |"))),
+                    "{k} no está en la tabla de {readme}"
+                );
+            }
+            assert!(
+                texto.contains(contrato),
+                "{readme} no dice que la configuración es un contrato hasta la 2.0"
+            );
+        }
+    }
+
+    fn lector(vars: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
+        let vars: Vec<(String, String)> = vars
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect();
+        move |k| vars.iter().find(|(c, _)| c == k).map(|(_, v)| v.clone())
+    }
+
+    /// Un cambio de nombre de prueba: hoy no hay ninguno.
+    const PRUEBA: &[(&str, &str)] = &[("SEMILLERO_BASE", "SEMILLERO_DB")];
+
+    #[test]
+    fn hoy_no_cambia_de_nombre_ninguna_variable() {
+        assert_eq!(RENOMBRADAS, &[] as &[(&str, &str)]);
+    }
+
+    #[test]
+    fn con_solo_el_nombre_viejo_vale_y_avisa() {
+        let (leer, avisos) = con_renombres(lector(&[("SEMILLERO_BASE", "/v/vieja.db")]), PRUEBA);
+        let c = Config::desde(&leer).unwrap();
+        assert_eq!(c.db, std::path::Path::new("/v/vieja.db"));
+        assert_eq!(avisos.len(), 1, "{avisos:?}");
+        assert!(avisos[0].contains("SEMILLERO_BASE"), "{avisos:?}");
+        assert!(avisos[0].contains("SEMILLERO_DB"), "{avisos:?}");
+        // El aviso nunca lleva el valor.
+        assert!(!avisos[0].contains("/v/vieja.db"), "{avisos:?}");
+    }
+
+    #[test]
+    fn con_los_dos_nombres_manda_el_nuevo_y_avisa_que_el_viejo_se_ignora() {
+        let (leer, avisos) = con_renombres(
+            lector(&[
+                ("SEMILLERO_BASE", "/v/vieja.db"),
+                ("SEMILLERO_DB", "/v/nueva.db"),
+            ]),
+            PRUEBA,
+        );
+        let c = Config::desde(&leer).unwrap();
+        assert_eq!(c.db, std::path::Path::new("/v/nueva.db"));
+        assert_eq!(avisos.len(), 1, "{avisos:?}");
+        assert!(avisos[0].contains("SEMILLERO_BASE"), "{avisos:?}");
+        assert!(avisos[0].contains("se ignora"), "{avisos:?}");
+    }
+
+    #[test]
+    fn con_solo_el_nombre_nuevo_no_hay_aviso() {
+        let (leer, avisos) = con_renombres(lector(&[("SEMILLERO_DB", "/v/nueva.db")]), PRUEBA);
+        assert_eq!(
+            Config::desde(&leer).unwrap().db,
+            std::path::Path::new("/v/nueva.db")
+        );
+        assert_eq!(avisos, Vec::<String>::new());
+    }
+
+    /// Con la tabla de verdad, todo se lee como antes, sin avisos.
+    #[test]
+    fn con_la_tabla_de_verdad_se_lee_como_antes() {
+        let vars = [
+            ("SEMILLERO_LISTEN", "192.0.2.4"),
+            ("SEMILLERO_PORT", "7000"),
+            ("SEMILLERO_DB", " /var/db/semillero.db "),
+            ("SEMILLERO_LOG", "debug"),
+        ];
+        let (leer, avisos) = con_renombres(lector(&vars), RENOMBRADAS);
+        assert_eq!(avisos, Vec::<String>::new());
+        assert_eq!(leer("SEMILLERO_LOG").as_deref(), Some("debug"));
+        let c = Config::desde(&leer).unwrap();
+        assert_eq!(c, Config::desde(lector(&vars)).unwrap());
+        assert_eq!(c.escucha, "192.0.2.4:7000".parse().unwrap());
+        assert_eq!(c.db, std::path::Path::new("/var/db/semillero.db"));
+    }
+}

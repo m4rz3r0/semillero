@@ -626,3 +626,68 @@ async fn al_pasar_a_la_lista_blanca_ofrece_borrar_la_contrasena() {
     assert!(!leer(&env).contains("SEMILLERO_QBT_CLAVE"));
     sin_secretos(&s, &env);
 }
+
+/// El formato del fichero que escribe `semillero configurar` es parte del
+/// contrato de configuración hasta la 2.0: con las mismas respuestas, los
+/// mismos bytes. Si esta prueba falla, el cambio rompe los ficheros ya
+/// escritos; un nombre que cambia va por `config::RENOMBRADAS`.
+#[tokio::test]
+async fn el_fichero_que_escribe_es_el_del_contrato() {
+    let sim = qbt_sim::arrancar(qbt_sim::Conf {
+        usuario: "semillero".into(),
+        ..sim_conf()
+    })
+    .await;
+    let jf = jellyfin_falso().await;
+    let dir = tempfile::tempdir().unwrap();
+    let env = dir.path().join("semillero.env");
+    let s = configurar(
+        dir.path(),
+        &[
+            "192.0.2.10:8091",
+            "https://semillero.example",
+            &sim.url,
+            "1",
+            "semillero",
+            CLAVE_QBT,
+            "192.0.2.99",
+            &jf,
+            CLAVE_JF,
+            "/run/semillero/estado",
+            "/var/db/semillero/semillero.db",
+        ],
+        &[],
+    )
+    .await;
+    assert!(s.exito, "{}", s.texto);
+    let qbt_clave = dir.path().join("qbt.clave");
+    let jf_clave = dir.path().join("jellyfin.clave");
+    let esperado = format!(
+        "# Configuración de semillero, escrita por «semillero configurar» (vuelve a\n\
+         # ejecutarlo para cambiarla). Una variable por línea, VARIABLE=valor, sin\n\
+         # comillas; la lista está en el README. La contraseña de qBittorrent y la\n\
+         # clave de Jellyfin no van aquí: cada una en su fichero, solo para su dueño.\n\
+         \n\
+         SEMILLERO_LISTEN=192.0.2.10:8091\n\
+         SEMILLERO_ORIGEN=https://semillero.example\n\
+         SEMILLERO_QBT={qbt}\n\
+         SEMILLERO_QBT_USUARIO=semillero\n\
+         SEMILLERO_QBT_CLAVE={qbt_clave}\n\
+         SEMILLERO_PROXY=192.0.2.99\n\
+         SEMILLERO_JELLYFIN={jf}\n\
+         SEMILLERO_JELLYFIN_CLAVE={jf_clave}\n\
+         SEMILLERO_ESTADO=/run/semillero/estado\n\
+         SEMILLERO_DB=/var/db/semillero/semillero.db\n",
+        qbt = sim.url,
+        qbt_clave = qbt_clave.display(),
+        jf_clave = jf_clave.display(),
+    );
+    assert_eq!(
+        std::fs::read(&env).unwrap(),
+        esperado.into_bytes(),
+        "el formato del fichero de semillero configurar es el contrato de configuración \
+         hasta la 2.0:\n{}",
+        leer(&env)
+    );
+    sin_secretos(&s, &env);
+}

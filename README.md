@@ -116,6 +116,11 @@ repositorio.
 
 Sustituye `X.Y.Z` por la versión.
 
+Para actualizar, cambia el programa por el de la versión nueva y reinicia:
+la base de datos se migra sola. La CI prueba en cada cambio que cualquier
+versión publicada desde la 0.3.0 se actualiza a la nueva sin pasos a mano y
+conserva todos sus datos (`.github/workflows/actualizacion.yml`).
+
 ### Versiones de qBittorrent que valen
 
 La CI prueba cada cambio de punta a punta contra un qBittorrent de verdad
@@ -172,6 +177,12 @@ el entorno, manda sobre la del fichero.
 clave de Jellyfin van en un fichero cada una, solo para el dueño (`chmod
 600`), y no en una variable porque las variables se ven en la lista de
 procesos.
+
+Estas variables y el formato del fichero que escribe `semillero configurar`
+son un contrato hasta la 2.0: no se quitan ni cambian. Si alguna cambia de
+nombre, el viejo sigue valiendo al menos una versión, con un aviso en el
+registro que dice el nuevo; si están los dos, manda el nuevo y el aviso dice
+que el viejo se ignora.
 
 El fichero de `SEMILLERO_ESTADO` lo escribe el programa que mantiene la VPN
 y abre el puerto, al menos cada 45 segundos, con estas líneas:

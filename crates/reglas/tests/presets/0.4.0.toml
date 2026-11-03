@@ -1,0 +1,22 @@
+formato = 1
+nombre = "Exportado por semillero 0.4.0"
+descripcion = "Preset de compatibilidad: lo escribió esta versión y no se edita."
+
+[normas]
+umbral_pct = 12.5
+siembra_dias = 11
+ratio_min = 1.25
+plazo_largo_dias = 45
+ratio_pausa = 2.75
+aviso_horas = 36
+
+[categorias.peliculas]
+ratio = 2.5
+siembra_dias = 21
+
+[categorias.series]
+ratio = 1.75
+inactividad_dias = 9
+
+[categorias.sin_categoria]
+disco_libre_pct = 12.5

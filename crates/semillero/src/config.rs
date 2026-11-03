@@ -34,6 +34,12 @@
 //! solo si la conexión viene de `SEMILLERO_PROXY`; si viene de cualquier
 //! otra IP, o no hay proxy configurado, la cabecera se ignora y vale la IP
 //! de la conexión.
+//!
+//! Las variables ([`VARIABLES`]) y el formato del fichero que escribe
+//! `semillero configurar` son un contrato hasta la 2.0: no se quitan ni
+//! cambian de nombre. Si alguna cambia de nombre, el viejo va en
+//! [`RENOMBRADAS`] y sigue valiendo, con un aviso en el registro, al menos
+//! una versión; si están los dos, manda el nuevo.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -81,13 +87,71 @@ pub struct ConfCuentaQbt {
     pub clave: PathBuf,
 }
 
+/// Las variables `SEMILLERO_*` que lee semillero. Es el contrato de
+/// configuración hasta la 2.0: la configuración no lee ninguna que no esté
+/// aquí (ver [`variable`]), y las pruebas fallan si la lista cambia.
+pub const VARIABLES: &[&str] = &[
+    "SEMILLERO_LISTEN",
+    "SEMILLERO_PORT",
+    "SEMILLERO_QBT",
+    "SEMILLERO_QBT_CLAVE",
+    "SEMILLERO_QBT_USUARIO",
+    "SEMILLERO_LOGIN_DESDE",
+    "SEMILLERO_DB",
+    "SEMILLERO_ESTADO",
+    "SEMILLERO_ORIGEN",
+    "SEMILLERO_PROXY",
+    "SEMILLERO_LOG",
+    "SEMILLERO_JELLYFIN",
+    "SEMILLERO_JELLYFIN_CLAVE",
+];
+
+/// Variables que han cambiado de nombre, `(vieja, nueva)`: la vieja sigue
+/// valiendo con un aviso (ver [`con_renombres`]) al menos una versión. Hoy
+/// no hay ninguna.
+pub const RENOMBRADAS: &[(&str, &str)] = &[];
+
+/// `leer` con los cambios de nombre de `renombradas` (`(vieja, nueva)`, ver
+/// [`RENOMBRADAS`]): al leer la nueva, si no está, vale la vieja. Devuelve
+/// también los avisos para el registro: uno por cada vieja que esté puesta,
+/// que dice si se usa o, si también está la nueva, que se ignora. Los avisos
+/// nombran las variables, nunca sus valores.
+pub fn con_renombres(
+    leer: impl Fn(&str) -> Option<String>,
+    renombradas: &'static [(&'static str, &'static str)],
+) -> (impl Fn(&str) -> Option<String>, Vec<String>) {
+    let puesta = |k: &str| leer(k).is_some_and(|v| !v.trim().is_empty());
+    let avisos = renombradas
+        .iter()
+        .filter(|(vieja, _)| puesta(vieja))
+        .map(|(vieja, nueva)| {
+            if puesta(nueva) {
+                format!("{vieja} se ignora: está también {nueva}, su nombre nuevo, y manda esa; quita {vieja}")
+            } else {
+                format!("{vieja} ahora se llama {nueva}; sigue valiendo por ahora, pero cámbiala a {nueva}")
+            }
+        })
+        .collect();
+    let lector = move |k: &str| match renombradas.iter().find(|(_, nueva)| *nueva == k) {
+        Some((vieja, _)) => leer(k)
+            .filter(|v| !v.trim().is_empty())
+            .or_else(|| leer(vieja)),
+        None => leer(k),
+    };
+    (lector, avisos)
+}
+
 const PUERTO: u16 = 8090;
 /// Más que esto no es una contraseña ni una clave de API.
 const MAX_SECRETO_BYTES: u64 = 1024;
 
 /// Lee la variable `k` con `leer`, sin espacios alrededor; vacía es como
-/// si no estuviera.
+/// si no estuviera. Una `SEMILLERO_*` tiene que estar en [`VARIABLES`].
 fn variable(leer: &impl Fn(&str) -> Option<String>, k: &str) -> Option<String> {
+    debug_assert!(
+        !k.starts_with("SEMILLERO_") || VARIABLES.contains(&k),
+        "{k} no está en config::VARIABLES, el contrato de configuración"
+    );
     leer(k)
         .map(|v| v.trim().to_owned())
         .filter(|v| !v.is_empty())

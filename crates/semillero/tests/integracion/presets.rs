@@ -626,3 +626,86 @@ async fn en_solo_vigilar_guardar_normas_y_reglas_no_pide_la_contrasena() {
         Some(reglas)
     );
 }
+
+/// Los presets que exportaron la 0.3.0 y la 0.6.0 (con normas por tracker),
+/// tal cual (ver `crates/reglas/tests/presets/LEEME.md`).
+const DE_LA_0_3_0: &str = include_str!("../../../reglas/tests/presets/0.3.0.toml");
+const DE_LA_0_6_0_TRACKERS: &str =
+    include_str!("../../../reglas/tests/presets/0.6.0-trackers.toml");
+
+#[tokio::test]
+async fn los_presets_de_versiones_anteriores_se_suben_y_aplican_con_sus_normas() {
+    let u = ui().await;
+    let normas = NormasTracker {
+        umbral_pct: 12.5,
+        siembra_dias: 11,
+        ratio_min: 1.25,
+        plazo_largo_dias: 45,
+        ratio_pausa: 2.75,
+        aviso_horas: 36,
+    };
+    let trackers = std::collections::BTreeMap::from([
+        (
+            "tracker.ejemplo.example".to_string(),
+            NormasTracker {
+                umbral_pct: 5.0,
+                siembra_dias: 14,
+                ratio_min: 1.0,
+                plazo_largo_dias: 60,
+                ratio_pausa: 3.0,
+                aviso_horas: 48,
+            },
+        ),
+        (
+            "segundo.example".to_string(),
+            NormasTracker {
+                umbral_pct: 20.0,
+                siembra_dias: 3,
+                ratio_min: 0.8,
+                plazo_largo_dias: 20,
+                ratio_pausa: 1.5,
+                aviso_horas: 12,
+            },
+        ),
+    ]);
+    let series = ReglasCategoria {
+        ratio: Some(1.75),
+        inactividad_dias: Some(9),
+        ..Default::default()
+    };
+
+    for (archivo, nombre, sus_trackers) in [
+        (
+            DE_LA_0_3_0,
+            "Exportado por semillero 0.3.0",
+            std::collections::BTreeMap::new(),
+        ),
+        (
+            DE_LA_0_6_0_TRACKERS,
+            "Exportado por semillero 0.6.0",
+            trackers,
+        ),
+    ] {
+        let (s, cuerpo) = u.subir(archivo).await;
+        assert_eq!(s, StatusCode::OK, "{nombre}: {cuerpo}");
+        let id = u.id_de(nombre).await;
+        let guardado = db::preset(&u.p.state.db, id).await.unwrap().unwrap();
+        assert_eq!(guardado.normas, normas, "{nombre}");
+        assert_eq!(guardado.trackers, sus_trackers, "{nombre}");
+        assert_eq!(guardado.categorias["series"], series, "{nombre}");
+
+        let (s, _) = u.llamar("/api/aplicar_preset", json!({ "id": id })).await;
+        assert_eq!(s, StatusCode::OK, "{nombre}");
+        assert_eq!(db::normas(&u.p.state.db).await.unwrap(), normas, "{nombre}");
+        assert_eq!(
+            db::normas_trackers(&u.p.state.db).await.unwrap(),
+            sus_trackers,
+            "{nombre}"
+        );
+        assert_eq!(
+            db::reglas(&u.p.state.db).await.unwrap()["series"],
+            series,
+            "{nombre}"
+        );
+    }
+}

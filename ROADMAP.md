@@ -60,6 +60,29 @@ estrictas.
 - **Añadir torrents desde semillero**: subir un `.torrent` o pegar un enlace
   magnet, con su categoría, sin pasar por la WebUI de qBittorrent.
 
+## 0.7: compatibilidad probada
+
+La primera parte de la 1.0: que lo que promete sobre la configuración, la
+base de datos y los presets esté comprobado por pruebas, no solo escrito.
+
+- El contrato de configuración, fijado por una prueba: las variables
+  `SEMILLERO_*` y el fichero que escribe `semillero configurar`. Si una
+  variable cambia de nombre, el nombre viejo sigue funcionando con un aviso
+  en el registro.
+- La actualización se prueba desde cada versión publicada desde la 0.3.0,
+  con sus binarios de verdad, y la base de datos de cada versión se abre con
+  todas sus filas.
+- Un preset real exportado por cada versión publicada, guardado en el
+  repositorio; la versión nueva tiene que cargarlos todos igual.
+- Pruebas de propiedades en el crate `reglas`: ningún torrent que no haya
+  cumplido sale nunca como «Listo para recoger».
+
+## 0.8: seguridad y accesibilidad
+
+- Revisión de seguridad de la entrada, la sesión y el borrado.
+- La web se puede usar entera con teclado y con lector de pantalla, y se lee
+  bien en el móvil.
+
 ## 1.0: estable
 
 - **Contrato de configuración cerrado.** Las variables `SEMILLERO_*` y el

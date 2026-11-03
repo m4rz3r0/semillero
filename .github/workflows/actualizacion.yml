@@ -1,10 +1,13 @@
-# Prueba del salto de versión en cada push y pull request: la última
-# versión publicada anterior a la de Cargo.toml arranca como la deja la guía
-# (con la clave de Jellyfin donde la busca por defecto), se le meten datos y
-# el binario nuevo, compilado de este commit, tiene que arrancar con la misma
-# configuración y los mismos ficheros y conservar todas las filas
-# (tools/ci/salto-de-version.sh). Existe porque la 0.3.0 cambió sin migración
-# la ruta por defecto de la clave de Jellyfin y ninguna prueba lo vio.
+# Prueba del salto de versión en cada push y pull request: cada versión
+# publicada desde la 0.3.0 y anterior a la de Cargo.toml (la lista sale de las
+# releases de GitHub al correr, con tools/ci/versiones-publicadas.sh) arranca
+# como la deja la guía (con la clave de Jellyfin donde la busca por defecto),
+# se le meten datos y el binario nuevo, compilado una sola vez de este commit,
+# tiene que arrancar con la misma configuración y los mismos ficheros y
+# conservar todas las filas (tools/ci/salto-de-version.sh). Existe porque la
+# 0.3.0 cambió sin migración la ruta por defecto de la clave de Jellyfin y
+# ninguna prueba lo vio, y porque la 1.0 promete que cualquier 0.3 o posterior
+# se actualiza sin pasos a mano.
 #
 # Las acciones de terceros van fijadas por commit (con su versión al lado);
 # para subirlas, git ls-remote https://github.com/<dueño>/<acción> refs/tags/<versión>
@@ -30,14 +33,12 @@ env:
   LEPTOS_OUTPUT_NAME: semillero
 
 jobs:
-  salto:
-    name: Salto desde la versión publicada anterior
+  versiones:
+    name: Versiones publicadas desde la 0.3.0
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    permissions:
-      contents: read
-      # gh attestation verify del paquete que se descarga (solo lectura).
-      attestations: read
+    timeout-minutes: 10
+    outputs:
+      lista: ${{ steps.lista.outputs.lista }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -45,14 +46,73 @@ jobs:
       - name: Herramientas
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends shellcheck sqlite3
+          sudo apt-get install -y -q --no-install-recommends shellcheck
       - name: Sintaxis
-        run: shellcheck -x tools/ci/salto-*.sh
+        run: shellcheck -x tools/ci/salto-*.sh tools/ci/versiones-*.sh
+      - name: Lista
+        id: lista
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          lista=$(sh tools/ci/versiones-publicadas.sh --json)
+          echo "versiones: $lista"
+          echo "lista=$lista" >>"$GITHUB_OUTPUT"
+
+  nueva:
+    name: Binario nuevo
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Rust de rust-toolchain.toml
         run: rustup toolchain install && rustup show active-toolchain
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # Como lo compila salto-de-version.sh sin BINARIO, y con la versión de
+      # Cargo.toml (lo que el guion comprueba en /salud cuando compila él).
+      - name: Compilar
+        run: |
+          cargo build --release -p semillero --bin semillero --locked --features ssr
+          v=$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/semillero/Cargo.toml | head -n 1)
+          test "$(target/release/semillero --version)" = "semillero $v"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: semillero-nueva
+          path: target/release/semillero
+          if-no-files-found: error
+          retention-days: 1
+
+  salto:
+    name: Salto desde la ${{ matrix.version }}
+    needs: [versiones, nueva]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # gh attestation verify del paquete que se descarga (solo lectura).
+      attestations: read
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJSON(needs.versiones.outputs.lista) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Herramientas
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends sqlite3
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: semillero-nueva
+          path: nueva
       - name: Salto de versión
         env:
           GH_TOKEN: ${{ github.token }}
           SALTO_ATESTACION: "1"
-        run: sh tools/ci/salto-de-version.sh
+          ANTIGUA: ${{ matrix.version }}
+        run: |
+          chmod +x nueva/semillero
+          sh tools/ci/salto-de-version.sh "$ANTIGUA" nueva/semillero
